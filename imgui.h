@@ -1,4 +1,4 @@
-// dear imgui, v1.50 WIP
+﻿// dear imgui, v1.50 WIP
 // (headers)
 
 // See imgui.cpp file for documentation.
@@ -868,9 +868,16 @@ public:
     inline void                 reserve(int new_capacity)
     {
         if (new_capacity <= Capacity) return;
-        T* new_data = (value_type*)ImGui::MemAlloc((size_t)new_capacity * sizeof(value_type));
+        const size_t new_capacity_bytes = (size_t)new_capacity * sizeof(value_type);
+        const size_t         size_bytes = (size_t)Size * sizeof(value_type);
+        T* new_data = (value_type*)ImGui::MemAlloc(new_capacity_bytes);
         if (Data)
-            memcpy(new_data, Data, (size_t)Size * sizeof(value_type));
+        {
+            memcpy(new_data, Data, size_bytes);
+            memset(new_data + Size, 0, new_capacity_bytes - size_bytes);
+        }
+        else
+            memset(new_data, 0, new_capacity_bytes);
         ImGui::MemFree(Data);
         Data = new_data;
         Capacity = new_capacity;
