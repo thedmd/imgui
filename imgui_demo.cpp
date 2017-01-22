@@ -101,6 +101,7 @@ Index of this file:
 // [SECTION] DemoWindowWidgetsTooltips()
 // [SECTION] DemoWindowWidgetsTreeNodes()
 // [SECTION] DemoWindowWidgetsVerticalSliders()
+// [SECTION] DemoWindowWidgetsHitTest()
 // [SECTION] DemoWindowWidgets()
 // [SECTION] DemoWindowLayout()
 // [SECTION] DemoWindowPopups()
@@ -4659,6 +4660,63 @@ static void DemoWindowWidgetsVerticalSliders()
 }
 
 //-----------------------------------------------------------------------------
+// [SECTION] DemoWindowWidgetsHitTest()
+//-----------------------------------------------------------------------------
+
+#ifdef IMGUI_HAS_HIT_TEST
+static void DemoWindowWidgetsHitTest()
+{
+    IMGUI_DEMO_MARKER("Widgets/Hit Test");
+    if (ImGui::TreeNode("Hit Test"))
+    {
+        struct MyHitTests
+        {
+            static bool CircleHitTest(ImGuiHitTestCallbackData* data)
+            {
+                // Ellipse inscribed in the item rectangle, grown by the padding Dear ImGui adds for touch input
+                const ImVec2 center = ImVec2((data->RectMin.x + data->RectMax.x) / 2, (data->RectMin.y + data->RectMax.y) / 2);
+                const ImVec2 radii = ImVec2(center.x - data->RectMin.x + data->Padding.x, center.y - data->RectMin.y + data->Padding.y);
+                if (radii.x <= 0.0f || radii.y <= 0.0f) // ignore zero size rects
+                    return false;
+                ImVec2 point_on_unit_circle = ImVec2((data->MousePos.x - center.x) / radii.x, (data->MousePos.y - center.y) / radii.y);
+                float distance_on_unit_circle = point_on_unit_circle.x * point_on_unit_circle.x + point_on_unit_circle.y * point_on_unit_circle.y;
+                return distance_on_unit_circle <= 1.0f;
+            }
+        };
+
+        static bool show_hit_area = true;
+        ImGui::Checkbox("Show Hit Area", &show_hit_area);
+
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 75.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.5f));
+
+        ImGui::BeginGroup();
+        static int button_without_hit_test_click_count = 0;
+        if (ImGui::Button("ImGui::Button()\nwithout hit test!", ImVec2(150, 150)))
+            ++button_without_hit_test_click_count;
+        if (show_hit_area)
+            ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(255, 0, 0, 64));
+        ImGui::Text("Clicks: %d", button_without_hit_test_click_count);
+        ImGui::EndGroup();
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        static int button_with_hit_test_click_count = 0;
+        ImGui::PushHitTest(&MyHitTests::CircleHitTest);
+        if (ImGui::Button("ImGui::Button()\nwith hit test!", ImVec2(150, 150)))
+            ++button_with_hit_test_click_count;
+        if (show_hit_area)
+            ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(255, 0, 0, 64), 75.0f);
+        ImGui::PopHitTest();
+        ImGui::Text("Clicks: %d", button_with_hit_test_click_count);
+        ImGui::EndGroup();
+        ImGui::PopStyleVar(2);
+
+        ImGui::TreePop();
+    }
+}
+#endif
+
+//-----------------------------------------------------------------------------
 // [SECTION] DemoWindowWidgets()
 //-----------------------------------------------------------------------------
 
@@ -4712,6 +4770,9 @@ static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data)
     DemoWindowWidgetsTooltips();
     DemoWindowWidgetsTreeNodes();
     DemoWindowWidgetsVerticalSliders();
+#ifdef IMGUI_HAS_HIT_TEST
+    DemoWindowWidgetsHitTest();
+#endif
 
     if (override_liveedit)
     {
@@ -8634,6 +8695,9 @@ void ImGui::ShowAboutWindow(bool* p_open)
 #endif
 #ifdef NDEBUG
         ImGui::Text("define: NDEBUG");
+#endif
+#ifdef IMGUI_HAS_HIT_TEST
+        ImGui::Text("define/extension: IMGUI_HAS_HIT_TEST");
 #endif
 
         // Heuristic to detect no-op IM_ASSERT() macros

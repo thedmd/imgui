@@ -1099,6 +1099,7 @@ enum ImGuiItemStatusFlags_
     ImGuiItemStatusFlags_HasShortcut        = 1 << 10,  // g.LastItemData.Shortcut valid. Set by SetNextItemShortcut() -> ItemAdd().
     //ImGuiItemStatusFlags_FocusedByTabbing = 1 << 8,   // Removed IN 1.90.1 (Dec 2023). The trigger is part of g.NavActivateId. See commit 54c1bdeceb.
     ImGuiItemStatusFlags_EditedInternal     = 1 << 11,  // Similar to ImGuiItemStatusFlags_Edited but bypassing ImGuiItemFlags_NoMarkEdited.
+    ImGuiItemStatusFlags_HitTestRejected    = 1 << 12,  // Mouse position is within item rectangle, but the item hit test (PushHitTest()) rejected it. ImGuiItemStatusFlags_HoveredRect is not set then.
     
     // Additional status + semantic for ImGuiTestEngine
 #ifdef IMGUI_ENABLE_TEST_ENGINE
@@ -1284,6 +1285,16 @@ struct IMGUI_API ImGuiGroupData
     bool        BackupHoveredIdIsAlive;
     bool        BackupIsSameLine;
     bool        EmitItem;
+};
+
+// Stacked data for PushHitTest()/PopHitTest()
+struct ImGuiHitTestData
+{
+    ImGuiHitTestCallback Callback;
+    void*                UserData;
+
+    ImGuiHitTestData()                                                      { Callback = NULL; UserData = NULL; }
+    ImGuiHitTestData(ImGuiHitTestCallback callback, void* user_data = NULL) { Callback = callback; UserData = user_data; }
 };
 
 // Simple column measurement, currently used for MenuItem() only.. This is very short-sighted/throw-away code and NOT a generic helper.
@@ -1533,6 +1544,7 @@ struct IMGUI_API ImGuiErrorRecoveryState
     short   SizeOfItemFlagsStack;
     short   SizeOfBeginPopupStack;
     short   SizeOfDisabledStack;
+    short   SizeOfHitTestStack;
 
     ImGuiErrorRecoveryState() { memset((void*)this, 0, sizeof(*this)); }
 };
@@ -2986,8 +2998,10 @@ struct IMGUI_API ImGuiWindowTempData
     float                   ItemWidth;              // Current item width (>0.0: width in pixels, <0.0: align xx pixels to the right of window).
     float                   ItemWidthDefault;
     float                   TextWrapPos;            // Current text wrap pos.
+    ImGuiHitTestData        HitTest;                // Current item hit test function
     ImVector<float>         ItemWidthStack;         // Store item widths to restore (attention: .back() is not == ItemWidth)
     ImVector<float>         TextWrapPosStack;       // Store text wrap pos to restore (attention: .back() is not == TextWrapPos)
+    ImVector<ImGuiHitTestData> HitTestStack;        // Store hit test function to restore (attention: .back() is not == HitTest)
 };
 
 // Storage for one window

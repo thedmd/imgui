@@ -4931,6 +4931,7 @@ void ImGui::GcCompactTransientWindowBuffers(ImGuiWindow* window)
     window->DC.ChildWindows.clear();
     window->DC.ItemWidthStack.clear();
     window->DC.TextWrapPosStack.clear();
+    window->DC.HitTestStack.clear();
 }
 
 void ImGui::GcAwakeTransientWindowBuffers(ImGuiWindow* window)
@@ -5207,6 +5208,27 @@ bool ImGui::IsItemHovered(ImGuiHoveredFlags flags)
     return true;
 }
 
+// Item hit test (PushHitTest()), once the mouse is within the item rectangle.
+// Each item gets one verdict: ItemAdd() stores it in g.LastItemData, and widgets testing their item again (e.g. the frame without the label) reuse it.
+static bool ItemHitTest(const ImRect& bb, ImGuiID id)
+{
+    ImGuiContext& g = *GImGui;
+    if (id != 0 && id == g.LastItemData.ID && (g.LastItemData.StatusFlags & (ImGuiItemStatusFlags_HoveredRect | ImGuiItemStatusFlags_HitTestRejected)))
+        return (g.LastItemData.StatusFlags & ImGuiItemStatusFlags_HitTestRejected) == 0;
+    const ImGuiHitTestData& hit_test = g.CurrentWindow->DC.HitTest;
+    if (hit_test.Callback == NULL)
+        return true;
+    ImGuiHitTestCallbackData data;
+    data.Ctx = &g;
+    data.UserData = hit_test.UserData;
+    data.ID = id;
+    data.MousePos = g.IO.MousePos;
+    data.RectMin = bb.Min;
+    data.RectMax = bb.Max;
+    data.Padding = g.Style.TouchExtraPadding;
+    return hit_test.Callback(&data);
+}
+
 // Internal facing ItemHoverable() used when submitting widgets. THIS IS A SUBMISSION NOT A HOVER CHECK.
 // Returns whether the item was hovered, logic differs slightly from IsItemHovered().
 // (this does not rely on LastItemData it can be called from a ButtonBehavior() call not following an ItemAdd() call)
@@ -5233,6 +5255,8 @@ bool ImGui::ItemHoverable(const ImRect& bb, ImGuiID id, ImGuiItemFlags item_flag
     if (g.HoveredWindow != window)
         return false;
     if (!IsMouseHoveringRect(bb.Min, bb.Max))
+        return false;
+    if (!ItemHitTest(bb, id))
         return false;
 
     if (g.HoveredId != 0 && g.HoveredId != id && !g.HoveredIdAllowOverlap)
@@ -8226,6 +8250,8 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
         window->IDStack.resize(1);
         window->DrawList->_ResetForNewFrame();
         window->DC.CurrentTableIdx = -1;
+        window->DC.HitTest = ImGuiHitTestData(); // Before the decorations, which are items too
+        window->DC.HitTestStack.resize(0);
         if (flags & ImGuiWindowFlags_DockNodeHost)
         {
             window->DrawList->ChannelsSplit(2);
@@ -9140,6 +9166,21 @@ void ImGui::PopTextWrapPos()
     IM_ASSERT_USER_ERROR_RET(window->DC.TextWrapPosStack.Size > 0, "Calling PopTextWrapPos() too many times!");
     window->DC.TextWrapPos = window->DC.TextWrapPosStack.back();
     window->DC.TextWrapPosStack.pop_back();
+}
+
+void ImGui::PushHitTest(ImGuiHitTestCallback callback, void* user_data)
+{
+    ImGuiWindow* window = GetCurrentWindow();
+    window->DC.HitTestStack.push_back(window->DC.HitTest);
+    window->DC.HitTest = ImGuiHitTestData(callback, user_data);
+}
+
+void ImGui::PopHitTest()
+{
+    ImGuiWindow* window = GetCurrentWindow();
+    IM_ASSERT_USER_ERROR_RET(window->DC.HitTestStack.Size > 0, "Calling PopHitTest() too many times!");
+    window->DC.HitTest = window->DC.HitTestStack.back();
+    window->DC.HitTestStack.pop_back();
 }
 
 static ImGuiWindow* GetCombinedRootWindow(ImGuiWindow* window, bool popup_hierarchy, bool dock_hierarchy)
@@ -11969,6 +12010,7 @@ void ImGui::ErrorRecoveryStoreState(ImGuiErrorRecoveryState* state_out)
     state_out->SizeOfItemFlagsStack = (short)g.ItemFlagsStack.Size;
     state_out->SizeOfBeginPopupStack = (short)g.BeginPopupStack.Size;
     state_out->SizeOfDisabledStack = (short)g.DisabledStackSize;
+    state_out->SizeOfHitTestStack = (short)g.CurrentWindow->DC.HitTestStack.Size;
 }
 
 // Chosen name "Try to recover" over e.g. "Restore" to suggest this is not a 100% guaranteed recovery.
@@ -12055,6 +12097,11 @@ void    ImGui::ErrorRecoveryTryToRecoverWindowState(const ImGuiErrorRecoveryStat
     {
         IM_ASSERT_USER_ERROR(0, "Missing PopID()");
         PopID();
+    }
+    while (window->DC.HitTestStack.Size > state_in->SizeOfHitTestStack) //-V1044
+    {
+        IM_ASSERT_USER_ERROR(0, "Missing PopHitTest()");
+        PopHitTest();
     }
     while (g.DisabledStackSize > state_in->SizeOfDisabledStack) //-V1044
     {
@@ -12345,7 +12392,7 @@ bool ImGui::ItemAdd(const ImRect& bb, ImGuiID id, const ImRect* nav_bb_arg, ImGu
     if (is_rect_visible)
         g.LastItemData.StatusFlags |= ImGuiItemStatusFlags_Visible;
     if (IsMouseHoveringRect(bb.Min, bb.Max))
-        g.LastItemData.StatusFlags |= ImGuiItemStatusFlags_HoveredRect;
+        g.LastItemData.StatusFlags |= ItemHitTest(bb, id) ? ImGuiItemStatusFlags_HoveredRect : ImGuiItemStatusFlags_HitTestRejected;
     return true;
 }
 IM_MSVC_RUNTIME_CHECKS_RESTORE
@@ -16057,7 +16104,7 @@ bool ImGui::BeginDragDropTargetCustom(const ImRect& bb, ImGuiID id)
     if (hovered_window == NULL || window->RootWindowDockTree != hovered_window->RootWindowDockTree)
         return false;
     IM_ASSERT(id != 0);
-    if (!IsMouseHoveringRect(bb.Min, bb.Max) || (id == g.DragDropPayload.SourceId))
+    if (!IsMouseHoveringRect(bb.Min, bb.Max) || !ItemHitTest(bb, id) || (id == g.DragDropPayload.SourceId))
         return false;
     if (window->SkipItems)
         return false;
