@@ -7,6 +7,7 @@ Index of this file:
 
 // [SECTION] STB libraries implementation
 // [SECTION] Style functions
+// [SECTION] ImMatrix
 // [SECTION] ImDrawList
 // [SECTION] ImTriangulator, ImDrawList concave polygon fill
 // [SECTION] ImDrawListSplitter
@@ -396,6 +397,49 @@ void ImGui::StyleColorsLight(ImGuiStyle* dst)
 }
 
 //-----------------------------------------------------------------------------
+// [SECTION] ImMatrix
+//-----------------------------------------------------------------------------
+
+static inline float ImMatrixDeterminant(const ImMatrix& m)
+{
+    return m.m00 * m.m11 - m.m01 * m.m10;
+}
+
+static inline bool ImMatrixIsIdentity(const ImMatrix& m)
+{
+    return m.m00 == 1.0f && m.m01 == 0.0f && m.m10 == 0.0f && m.m11 == 1.0f && m.m20 == 0.0f && m.m21 == 0.0f;
+}
+
+ImMatrix ImMatrix::Inverted() const
+{
+    const float d00 = m11;
+    const float d01 = m01;
+
+    const float d10 = m10;
+    const float d11 = m00;
+
+    const float d20 = m10 * m21 - m11 * m20;
+    const float d21 = m00 * m21 - m01 * m20;
+
+    const float d = m00 * d00 - m10 * d01;
+
+    const float invD = d != 0.0f ? 1.0f / d : 0.0f;
+
+    return ImMatrix(
+         d00 * invD, -d01 * invD,
+        -d10 * invD,  d11 * invD,
+         d20 * invD, -d21 * invD);
+}
+
+ImMatrix ImMatrix::Rotation(float angle)
+{
+    const float s = ImSin(angle);
+    const float c = ImCos(angle);
+
+    return ImMatrix(c, s, -s, c, 0.0f, 0.0f);
+}
+
+//-----------------------------------------------------------------------------
 // [SECTION] ImDrawList
 //-----------------------------------------------------------------------------
 
@@ -480,6 +524,9 @@ void ImDrawList::_ResetForNewFrame()
     _Path.resize(0);
     _Splitter.Clear();
     CmdBuffer.push_back(ImDrawCmd());
+    PopTransformation(_TransformationStack.Size); // Restores the fringe scale if a scope was left open.
+    _Transformation = ImMatrix();
+    _InvTransformationScale = 1.0f;
     // Caller needs to bet _SetPixelDensity() as well.
 }
 
@@ -498,6 +545,7 @@ void ImDrawList::_ClearFreeMemory()
     _DrawFlagsStack.clear();
     _Path.clear();
     _Splitter.ClearFreeMemory();
+    _TransformationStack.clear();
 }
 
 // Note: For multi-threaded rendering, consider using `imgui_threaded_rendering` from https://github.com/ocornut/imgui_club
@@ -755,6 +803,213 @@ void ImDrawList::_SetPixelDensity(float pixel_density)
     _FringeScale = 1.0f / pixel_density;
     _InvFringeScale = pixel_density;
     _FringeScaleIsInteger = ImIsTruncated(_InvFringeScale);
+}
+
+void ImDrawList::PushTransformation(const ImMatrix& transformation, ImDrawTransformationFlags flags)
+{
+    ImDrawTransformation tr;
+    tr.VtxStartIdx                = VtxBuffer.Size;
+    tr.LastTransformation         = _Transformation;
+    tr.LastInvTransformationScale = _InvTransformationScale;
+    tr.LastFringeScale            = _FringeScale;
+    tr.LastInvFringeScale         = _InvFringeScale;
+    tr.LastFringeScaleIsInteger   = _FringeScaleIsInteger;
+    if ((flags & ImDrawTransformationFlags_Absolute) == 0)
+    {
+        tr.Transformation = transformation;
+        _Transformation = ImMatrix::Combine(transformation, _Transformation);
+    }
+    else if (ImMatrixDeterminant(_Transformation) != 0.0f)
+    {
+        tr.Transformation = ImMatrix::Combine(transformation, _Transformation.Inverted());
+        _Transformation = transformation;
+    }
+    else
+    {
+        // No matrix maps the vertices back into a singular parent scope: keep its transformation.
+        tr.Transformation = ImMatrix();
+    }
+    _TransformationStack.push_back(tr);
+
+    // The scale of the accumulated transformation: sqrt(|det|) is exact for uniform scale, rotation and mirror, and composes.
+    const ImDrawTransformation& base = _TransformationStack[0];
+    const ImMatrix& m = _Transformation;
+    const float det = ImMatrixDeterminant(m);
+    const float scale = (det != 0.0f) ? ImSqrt(ImFabs(det)) : 1.0f;
+    _InvTransformationScale = 1.0f / scale;
+    _FringeScale            = base.LastFringeScale / scale;
+    _InvFringeScale         = base.LastInvFringeScale * scale;
+
+    // Pixel aligned fast paths emit rectangles without AA: keep them while whole local units map to whole pixels along the axes.
+    const bool is_axis_aligned = (m.m01 == 0.0f && m.m10 == 0.0f && ImFabs(m.m00) == ImFabs(m.m11)) || (m.m00 == 0.0f && m.m11 == 0.0f && ImFabs(m.m01) == ImFabs(m.m10));
+    _FringeScaleIsInteger   = is_axis_aligned && ImIsTruncated(_InvFringeScale) && ImIsTruncated(m.m20 * base.LastInvFringeScale) && ImIsTruncated(m.m21 * base.LastInvFringeScale);
+}
+
+void ImDrawList::PopTransformation(int count)
+{
+    if (_TransformationStack.Size < count)
+    {
+        IM_ASSERT_USER_ERROR(0, "Calling PopTransformation() too many times!");
+        count = _TransformationStack.Size;
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        const ImDrawTransformation& tr = _TransformationStack.back();
+        if (tr.VtxStartIdx < VtxBuffer.Size && !ImMatrixIsIdentity(tr.Transformation))
+        {
+            const ImMatrix& m = tr.Transformation;
+
+            ImDrawVert* const vertexBegin = VtxBuffer.Data + tr.VtxStartIdx;
+            ImDrawVert* const vertexEnd   = VtxBuffer.Data + VtxBuffer.Size;
+
+            for (ImDrawVert* vertex = vertexBegin; vertex != vertexEnd; ++vertex)
+            {
+                const float x = vertex->pos.x;
+                const float y = vertex->pos.y;
+
+                vertex->pos.x = m.m00 * x + m.m10 * y + m.m20;
+                vertex->pos.y = m.m01 * x + m.m11 * y + m.m21;
+            }
+        }
+
+        _Transformation         = tr.LastTransformation;
+        _InvTransformationScale = tr.LastInvTransformationScale;
+        _FringeScale            = tr.LastFringeScale;
+        _InvFringeScale         = tr.LastInvFringeScale;
+        _FringeScaleIsInteger   = tr.LastFringeScaleIsInteger;
+
+        _TransformationStack.pop_back();
+    }
+}
+
+// RenderText() culls, clips, snaps and lays out glyphs in local coordinates.
+void ImDrawList::_AddTransformedText(ImFont* font, float font_size, const ImVec2& pos, ImU32 col, const char* text_begin, const char* text_end, float wrap_width, const ImVec4* cpu_fine_clip_rect)
+{
+    // Bounding box of the clip rect in local coordinates. Under rotation it is larger than the clip rect, which only culls less.
+    const ImMatrix& m = _Transformation;
+    ImVec4 clip_rect(-FLT_MAX, -FLT_MAX, FLT_MAX, FLT_MAX);
+    if (ImMatrixDeterminant(m) != 0.0f)
+    {
+        const ImMatrix inv = m.Inverted();
+        const ImVec4& cr = _CmdHeader.ClipRect;
+        const ImVec2 c0 = inv.Transformed(ImVec2(cr.x, cr.y));
+        const ImVec2 c1 = inv.Transformed(ImVec2(cr.z, cr.y));
+        const ImVec2 c2 = inv.Transformed(ImVec2(cr.z, cr.w));
+        const ImVec2 c3 = inv.Transformed(ImVec2(cr.x, cr.w));
+        const ImVec4 bb(ImMin(ImMin(c0.x, c1.x), ImMin(c2.x, c3.x)), ImMin(ImMin(c0.y, c1.y), ImMin(c2.y, c3.y)), ImMax(ImMax(c0.x, c1.x), ImMax(c2.x, c3.x)), ImMax(ImMax(c0.y, c1.y), ImMax(c2.y, c3.y)));
+        if (bb.x <= bb.z && bb.y <= bb.w) // False with NaN
+            clip_rect = bb;
+    }
+    if (cpu_fine_clip_rect)
+    {
+        clip_rect.x = ImMax(clip_rect.x, cpu_fine_clip_rect->x);
+        clip_rect.y = ImMax(clip_rect.y, cpu_fine_clip_rect->y);
+        clip_rect.z = ImMin(clip_rect.z, cpu_fine_clip_rect->z);
+        clip_rect.w = ImMin(clip_rect.w, cpu_fine_clip_rect->w);
+    }
+
+    // Snap in screen coordinates under translation, in local ones while whole units map to whole pixels, else not at all.
+    ImVec2 text_pos = pos;
+    bool pixel_snap = (Flags & ImDrawFlags_TextNoPixelSnap) == 0;
+    if (pixel_snap && m.m00 == 1.0f && m.m01 == 0.0f && m.m10 == 0.0f && m.m11 == 1.0f)
+    {
+        text_pos.x = IM_TRUNC(pos.x + m.m20) - m.m20;
+        text_pos.y = IM_TRUNC(pos.y + m.m21) - m.m21;
+        pixel_snap = false;
+    }
+    else if (!_FringeScaleIsInteger)
+    {
+        pixel_snap = false;
+    }
+
+    // Glyph bitmaps come from a bake for the scale of the transformation, rounded to a quarter octave so that zooming bakes few sizes.
+    // A locked atlas or font cannot bake other densities.
+    ImFontBaked* layout_baked = font->GetFontBaked(font_size);
+    ImFontBaked* raster_baked = layout_baked;
+    if (font->OwnerAtlas->RendererHasTextures && (font->Flags & ImFontFlags_LockBakedSizes) == 0)
+    {
+        const float scale_quarter_octaves = ImFloor(ImLog(1.0f / _InvTransformationScale) * (4.0f / 0.69314718f) + 0.5f);
+        const float density = ImClamp(font->CurrentRasterizerDensity * ImPow(2.0f, scale_quarter_octaves * 0.25f), 1.0f / layout_baked->Size, IMGUI_FONT_SIZE_MAX / layout_baked->Size);
+        raster_baked = font->GetFontBaked(font_size, density);
+    }
+    if (raster_baked == layout_baked)
+    {
+        font->RenderText(this, font_size, text_pos, col, clip_rect, text_begin, text_end, wrap_width, ((cpu_fine_clip_rect != NULL) ? ImDrawTextFlags_CpuFineClip : ImDrawTextFlags_None) | (pixel_snap ? 0 : ImDrawFlags_TextNoPixelSnap));
+        return;
+    }
+
+    // Glyph positions come from the untransformed layout, as CalcTextSize() measures it: loaders that hint metrics, such as FreeType,
+    // round advances and ascent at the raster size, so the layout of 'raster_baked' would change at every step of the scale.
+    // As RenderText() takes both from a single bake, this follows its loop.
+    if (text_end == NULL)
+        text_end = text_begin + ImStrlen(text_begin);
+    const float scale = font_size / layout_baked->Size;
+    const float line_height = font_size;
+    const float baseline_offset = (layout_baked->Ascent - raster_baked->Ascent) * scale;
+    const bool word_wrap_enabled = (wrap_width > 0.0f);
+    const ImU32 col_untinted = col | ~IM_COL32_A_MASK;
+    const float origin_x = pixel_snap ? IM_TRUNC(text_pos.x) : text_pos.x;
+    float x = origin_x;
+    float y = pixel_snap ? IM_TRUNC(text_pos.y) : text_pos.y;
+    const char* word_wrap_eol = NULL;
+    for (const char* s = text_begin; s < text_end && y <= clip_rect.w; )
+    {
+        if (word_wrap_enabled)
+        {
+            if (word_wrap_eol == NULL)
+                word_wrap_eol = ImFontCalcWordWrapPositionEx(font, font_size, s, text_end, wrap_width - (x - origin_x), ImDrawTextFlags_None);
+            if (s >= word_wrap_eol)
+            {
+                x = origin_x;
+                y += line_height;
+                word_wrap_eol = NULL;
+                s = ImTextCalcWordWrapNextLineStart(s, text_end, ImDrawTextFlags_None);
+                continue;
+            }
+        }
+
+        unsigned int c = (unsigned int)*s;
+        s += (c < 0x80) ? 1 : ImTextCharFromUtf8(&c, s, text_end);
+        if (c == '\n')
+        {
+            x = origin_x;
+            y += line_height;
+            continue;
+        }
+        if (c == '\r')
+            continue;
+
+        const float char_width = layout_baked->GetCharAdvance((ImWchar)c) * scale;
+        const ImFontGlyph* glyph = (y + line_height >= clip_rect.y) ? raster_baked->FindGlyph((ImWchar)c) : NULL;
+        if (glyph != NULL && glyph->Visible)
+        {
+            float x1 = x + glyph->X0 * scale;
+            float x2 = x + glyph->X1 * scale;
+            float y1 = y + glyph->Y0 * scale + baseline_offset;
+            float y2 = y + glyph->Y1 * scale + baseline_offset;
+            if (x1 <= clip_rect.z && x2 >= clip_rect.x)
+            {
+                float u1 = glyph->U0;
+                float v1 = glyph->V0;
+                float u2 = glyph->U1;
+                float v2 = glyph->V1;
+                if (cpu_fine_clip_rect != NULL)
+                {
+                    if (x1 < clip_rect.x) { u1 = u1 + (1.0f - (x2 - clip_rect.x) / (x2 - x1)) * (u2 - u1); x1 = clip_rect.x; }
+                    if (y1 < clip_rect.y) { v1 = v1 + (1.0f - (y2 - clip_rect.y) / (y2 - y1)) * (v2 - v1); y1 = clip_rect.y; }
+                    if (x2 > clip_rect.z) { u2 = u1 + ((clip_rect.z - x1) / (x2 - x1)) * (u2 - u1); x2 = clip_rect.z; }
+                    if (y2 > clip_rect.w) { v2 = v1 + ((clip_rect.w - y1) / (y2 - y1)) * (v2 - v1); y2 = clip_rect.w; }
+                }
+                if (y1 < y2)
+                {
+                    PrimReserve(6, 4);
+                    PrimRectUV(ImVec2(x1, y1), ImVec2(x2, y2), ImVec2(u1, v1), ImVec2(u2, v2), glyph->Colored ? col_untinted : col);
+                }
+            }
+        }
+        x += char_width;
+    }
 }
 
 IM_MSVC_RUNTIME_CHECKS_OFF
@@ -1840,8 +2095,8 @@ void ImDrawList::PathRect(const ImVec2& a, const ImVec2& b, float rounding, ImDr
         if ((flags & ImDrawFlags_RoundMask_) == 0)
             flags |= ImDrawFlags_RoundAll;
 
-        rounding = ImMin(rounding, ImFabs(b.x - a.x) * (((flags & ImDrawFlags_RoundTop) == ImDrawFlags_RoundTop) || ((flags & ImDrawFlags_RoundBottom) == ImDrawFlags_RoundBottom) ? 0.5f : 1.0f) - 1.0f);
-        rounding = ImMin(rounding, ImFabs(b.y - a.y) * (((flags & ImDrawFlags_RoundLeft) == ImDrawFlags_RoundLeft) || ((flags & ImDrawFlags_RoundRight) == ImDrawFlags_RoundRight) ? 0.5f : 1.0f) - 1.0f);
+        rounding = ImMin(rounding, ImFabs(b.x - a.x) * (((flags & ImDrawFlags_RoundTop) == ImDrawFlags_RoundTop) || ((flags & ImDrawFlags_RoundBottom) == ImDrawFlags_RoundBottom) ? 0.5f : 1.0f) - _InvTransformationScale);
+        rounding = ImMin(rounding, ImFabs(b.y - a.y) * (((flags & ImDrawFlags_RoundLeft) == ImDrawFlags_RoundLeft) || ((flags & ImDrawFlags_RoundRight) == ImDrawFlags_RoundRight) ? 0.5f : 1.0f) - _InvTransformationScale);
     }
     if (!has_rounding || (flags & ImDrawFlags_RoundMask_) == ImDrawFlags_RoundNone)
     {
@@ -1994,12 +2249,14 @@ void ImDrawList::AddLine(const ImVec2& p1, const ImVec2& p2, ImU32 col, float th
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     flags |= Flags;
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeCenter);
     if (stroke_pos == ImDrawFlags_StrokeLegacy)
     {
-        _AddLine(ImVec2(p1.x + 0.5f, p1.y + 0.5f), ImVec2(p2.x + 0.5f, p2.y + 0.5f), col, thickness, flags);
+        const float half_pixel = 0.5f * _GetStrokeScale(flags);
+        _AddLine(ImVec2(p1.x + half_pixel, p1.y + half_pixel), ImVec2(p2.x + half_pixel, p2.y + half_pixel), col, thickness, flags);
         return;
     }
 
@@ -2013,12 +2270,14 @@ void ImDrawList::AddLineH(float min_x, float max_x, float y, ImU32 col, float th
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     flags |= Flags;
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
     if (stroke_pos == ImDrawFlags_StrokeLegacy)
     {
-        _AddLine(ImVec2(min_x + 0.5f, y + 0.5f), ImVec2(max_x + 0.5f, y + 0.5f), col, thickness, flags);
+        const float half_pixel = 0.5f * _GetStrokeScale(flags);
+        _AddLine(ImVec2(min_x + half_pixel, y + half_pixel), ImVec2(max_x + half_pixel, y + half_pixel), col, thickness, flags);
         return;
     }
 
@@ -2062,12 +2321,14 @@ void ImDrawList::AddLineV(float x, float min_y, float max_y, ImU32 col, float th
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     flags |= Flags;
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
     if (stroke_pos == ImDrawFlags_StrokeLegacy)
     {
-        _AddLine(ImVec2(x + 0.5f, min_y + 0.5f), ImVec2(x + 0.5f, max_y + 0.5f), col, thickness, flags);
+        const float half_pixel = 0.5f * _GetStrokeScale(flags);
+        _AddLine(ImVec2(x + half_pixel, min_y + half_pixel), ImVec2(x + half_pixel, max_y + half_pixel), col, thickness, flags);
         return;
     }
 
@@ -2359,13 +2620,15 @@ void ImDrawList::AddRect(const ImVec2& p_min, const ImVec2& p_max, ImU32 col, fl
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
     if (stroke_pos == ImDrawFlags_StrokeLegacy) IM_UNLIKELY
     {
+        const float half_pixel = 0.5f * _GetStrokeScale(flags);
         if (flags & ImDrawFlags_AALines)
-            PathRect(ImVec2(p_min.x + 0.50f, p_min.y + 0.50f), ImVec2(p_max.x - 0.50f, p_max.y - 0.50f), rounding, flags);
+            PathRect(ImVec2(p_min.x + half_pixel, p_min.y + half_pixel), ImVec2(p_max.x - half_pixel, p_max.y - half_pixel), rounding, flags);
         else
-            PathRect(ImVec2(p_min.x + 0.50f, p_min.y + 0.50f), ImVec2(p_max.x - 0.49f, p_max.y - 0.49f), rounding, flags); // Better looking lower-right corner and rounded non-AA shapes.
+            PathRect(ImVec2(p_min.x + half_pixel, p_min.y + half_pixel), ImVec2(p_max.x - half_pixel * 0.98f, p_max.y - half_pixel * 0.98f), rounding, flags); // Better looking lower-right corner and rounded non-AA shapes.
         PathStroke(col, thickness, ImDrawFlags_Closed | ImDrawFlags_JoinMiter | ImDrawFlags_StrokeCenter | (flags & ~ImDrawFlags_StrokeMask_));
         return;
     }
+    thickness *= _GetStrokeScale(flags); // After the legacy path: PathStroke() applies it.
 
     const bool has_rounding = IM_HAS_ROUNDING(rounding);
 
@@ -2402,8 +2665,8 @@ void ImDrawList::AddRect(const ImVec2& p_min, const ImVec2& p_max, ImU32 col, fl
     if (has_rounding)
     {
         // Constrain rounding to rect dimensions
-        outer_rounding = ImMin(outer_rounding, ImFabs(width) * (((flags & ImDrawFlags_RoundTop) == ImDrawFlags_RoundTop) || ((flags & ImDrawFlags_RoundBottom) == ImDrawFlags_RoundBottom) ? 0.5f : 1.0f) - 1.0f);
-        outer_rounding = ImMin(outer_rounding, ImFabs(height) * (((flags & ImDrawFlags_RoundLeft) == ImDrawFlags_RoundLeft) || ((flags & ImDrawFlags_RoundRight) == ImDrawFlags_RoundRight) ? 0.5f : 1.0f) - 1.0f);
+        outer_rounding = ImMin(outer_rounding, ImFabs(width) * (((flags & ImDrawFlags_RoundTop) == ImDrawFlags_RoundTop) || ((flags & ImDrawFlags_RoundBottom) == ImDrawFlags_RoundBottom) ? 0.5f : 1.0f) - _InvTransformationScale);
+        outer_rounding = ImMin(outer_rounding, ImFabs(height) * (((flags & ImDrawFlags_RoundLeft) == ImDrawFlags_RoundLeft) || ((flags & ImDrawFlags_RoundRight) == ImDrawFlags_RoundRight) ? 0.5f : 1.0f) - _InvTransformationScale);
     }
 
     const bool is_truncated = IM_IS_TRUNCATED4(outer_min.x, outer_min.y, outer_max.x, outer_max.y) && IM_IS_TRUNCATED4(outer_rounding, thickness, 0.0f, 0.0f); //-V501
@@ -2548,7 +2811,7 @@ void ImDrawList::AddRectFilled(const ImVec2& p_min, const ImVec2& p_max, ImU32 c
     const float min_dim = ImMin(width, height);
     flags |= Flags;
 
-    if ((flags & ImDrawFlags_StrokeMask_) == ImDrawFlags_StrokeLegacy && rounding < 0.5f) IM_UNLIKELY
+    if ((flags & ImDrawFlags_StrokeMask_) == ImDrawFlags_StrokeLegacy && rounding < 0.5f * _InvTransformationScale) IM_UNLIKELY
     {
         PrimReserve(6, 4);
         PrimRect(p_min, p_max, col);
@@ -2592,8 +2855,8 @@ void ImDrawList::AddRectFilled(const ImVec2& p_min, const ImVec2& p_max, ImU32 c
         if ((flags & ImDrawFlags_RoundMask_) == 0)
             flags |= ImDrawFlags_RoundAll;
 
-        rounding = ImMin(rounding, ImFabs(width) * (((flags & ImDrawFlags_RoundTop) == ImDrawFlags_RoundTop) || ((flags & ImDrawFlags_RoundBottom) == ImDrawFlags_RoundBottom) ? 0.5f : 1.0f) - 1.0f);
-        rounding = ImMin(rounding, ImFabs(height) * (((flags & ImDrawFlags_RoundLeft) == ImDrawFlags_RoundLeft) || ((flags & ImDrawFlags_RoundRight) == ImDrawFlags_RoundRight) ? 0.5f : 1.0f) - 1.0f);
+        rounding = ImMin(rounding, ImFabs(width) * (((flags & ImDrawFlags_RoundTop) == ImDrawFlags_RoundTop) || ((flags & ImDrawFlags_RoundBottom) == ImDrawFlags_RoundBottom) ? 0.5f : 1.0f) - _InvTransformationScale);
+        rounding = ImMin(rounding, ImFabs(height) * (((flags & ImDrawFlags_RoundLeft) == ImDrawFlags_RoundLeft) || ((flags & ImDrawFlags_RoundRight) == ImDrawFlags_RoundRight) ? 0.5f : 1.0f) - _InvTransformationScale);
 
         const int s_rounding = (int)(rounding * _InvFringeScale);
         if (s_rounding <= 0)
@@ -2653,6 +2916,7 @@ void ImDrawList::AddQuad(const ImVec2& p1, const ImVec2& p2, const ImVec2& p3, c
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     //flags |= Flags; // Not needed.
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
@@ -2675,6 +2939,7 @@ void ImDrawList::AddTriangle(const ImVec2& p1, const ImVec2& p2, const ImVec2& p
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     //flags |= Flags; // Not needed.
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
@@ -2705,12 +2970,13 @@ void ImDrawList::AddCircle(const ImVec2& center, float radius, ImU32 col, int nu
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     flags |= Flags;
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
     if (stroke_pos == ImDrawFlags_StrokeLegacy) IM_UNLIKELY
     {
-        radius -= 0.5f;
+        radius -= 0.5f * _GetStrokeScale(flags);
         stroke_pos = ImDrawFlags_StrokeCenter;
     }
     radius = ImMax(0.01f, radius);
@@ -2803,12 +3069,13 @@ void ImDrawList::AddNgon(const ImVec2& center, float radius, ImU32 col, int num_
 {
     if ((col & IM_COL32_A_MASK) == 0 || num_segments <= 2)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     flags |= Flags;
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
     if (stroke_pos == ImDrawFlags_StrokeLegacy) IM_UNLIKELY
     {
-        radius -= 0.5f;
+        radius -= 0.5f * _GetStrokeScale(flags);
         stroke_pos = ImDrawFlags_StrokeCenter;
     }
     radius = ImMax(0.01f, radius);
@@ -2871,6 +3138,7 @@ void ImDrawList::AddEllipse(const ImVec2& center, const ImVec2& radius, ImU32 co
 {
     if ((col & IM_COL32_A_MASK) == 0)
         return;
+    thickness *= _GetStrokeScale(flags);
 
     ImDrawFlags stroke_pos = _GetStrokePos(flags, ImDrawFlags_StrokeInside);
     if (stroke_pos == ImDrawFlags_StrokeLegacy)
@@ -2968,6 +3236,11 @@ void ImDrawList::AddText(ImFont* font, float font_size, const ImVec2& pos, ImU32
         font = _Data->Font;
     if (font_size == 0.0f)
         font_size = _Data->FontSize;
+    if (_TransformationStack.Size > 0)
+    {
+        _AddTransformedText(font, font_size, pos, col, text_begin, text_end, wrap_width, cpu_fine_clip_rect);
+        return;
+    }
 
     ImVec4 clip_rect = _CmdHeader.ClipRect;
     if (cpu_fine_clip_rect)
@@ -3026,7 +3299,7 @@ void ImDrawList::AddImageRounded(ImTextureRef tex_ref, const ImVec2& p_min, cons
     if ((flags & ImDrawFlags_RoundMask_) == 0)
         flags |= ImDrawFlags_RoundAll;
 
-    if (rounding < 0.5f || (flags & ImDrawFlags_RoundMask_) == ImDrawFlags_RoundNone)
+    if (rounding < 0.5f * _InvTransformationScale || (flags & ImDrawFlags_RoundMask_) == ImDrawFlags_RoundNone)
     {
         AddImage(tex_ref, p_min, p_max, uv_min, uv_max, col);
         return;
@@ -3523,6 +3796,11 @@ void ImDrawData::Clear()
 // as long at it is expected that the result will be later merged into draw_data->CmdLists[].
 void ImGui::AddDrawListToDrawDataEx(ImDrawData* draw_data, ImVector<ImDrawList*>* out_list, ImDrawList* draw_list)
 {
+    if (draw_list->_TransformationStack.Size > 0)
+    {
+        IM_ASSERT_USER_ERROR(0, "Missing PopTransformation()");
+        draw_list->PopTransformation(draw_list->_TransformationStack.Size);
+    }
     if (draw_list->CmdBuffer.Size == 0)
         return;
     if (draw_list->CmdBuffer.Size == 1 && draw_list->CmdBuffer[0].ElemCount == 0 && draw_list->CmdBuffer[0].UserCallback == NULL)

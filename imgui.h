@@ -35,6 +35,7 @@
 #define IMGUI_HAS_TEXTURES          // Added ImGuiBackendFlags_RendererHasTextures - from IMGUI_VERSION_NUM >= 19198
 #define IMGUI_HAS_VIEWPORT          // In 'docking' WIP branch.
 #define IMGUI_HAS_DOCK              // In 'docking' WIP branch.
+#define IMGUI_HAS_DRAWLIST_TRANSFORMATION // ImDrawList::PushTransformation()/PopTransformation()
 
 /*
 
@@ -251,6 +252,7 @@ typedef int ImGuiTableBgTarget;     // -> enum ImGuiTableBgTarget_   // Enum: A 
 //   - In VS Code, CLion, etc.: Ctrl+Click can follow symbols inside comments.
 typedef int ImDrawFlags;            // -> enum ImDrawFlags_          // Flags: for ImDrawList functions
 typedef int ImDrawTextFlags;        // -> enum ImDrawTextFlags_      // Internal, do not use!
+typedef int ImDrawTransformationFlags; // -> enum ImDrawTransformationFlags_ // Flags: for ImDrawList::PushTransformation()
 typedef int ImFontFlags;            // -> enum ImFontFlags_          // Flags: for ImFont
 typedef int ImFontAtlasFlags;       // -> enum ImFontAtlasFlags_     // Flags: for ImFontAtlas
 typedef int ImGuiBackendFlags;      // -> enum ImGuiBackendFlags_    // Flags: for io.BackendFlags
@@ -329,6 +331,55 @@ struct ImVec4
 #endif
 };
 IM_MSVC_RUNTIME_CHECKS_RESTORE
+
+// ImMatrix: 2D affine transformation, used by ImDrawList::PushTransformation()
+// - Maps (x, y) to (m00 * x + m10 * y + m20, m01 * x + m11 * y + m21).
+// - Combine(a, b) and 'a * b' (with IMGUI_DEFINE_MATH_OPERATORS) apply 'a' first: row vectors as in Direct2D, the opposite of GLM and Eigen.
+// - Inverted() of a matrix with a zero determinant is a zero matrix.
+struct ImMatrix
+{
+    float m00, m01, m10, m11, m20, m21;
+    ImMatrix() { m00 = m11 = 1.0f; m01 = m10 = m20 = m21 = 0.0f; }
+    ImMatrix(float _m00, float _m01, float _m10, float _m11, float _m20, float _m21) { m00 = _m00; m01 = _m01; m10 = _m10; m11 = _m11; m20 = _m20; m21 = _m21; }
+#ifdef IM_MATRIX_CLASS_EXTRA          // Define constructor and implicit cast operators in imconfig.h to convert back<>forth from your math types and ImMatrix.
+    IM_MATRIX_CLASS_EXTRA
+#endif
+
+    IMGUI_API ImMatrix Inverted() const;
+
+    static inline ImMatrix Translation(const ImVec2& p) { return Translation(p.x, p.y); }
+    static inline ImMatrix Translation(float x, float y) { return ImMatrix(1.0f, 0.0f, 0.0f, 1.0f, x, y); }
+    static inline ImMatrix Scaling(const ImVec2& p) { return Scaling(p.x, p.y); }
+    static inline ImMatrix Scaling(float x, float y) { return ImMatrix(x, 0.0f, 0.0f, y, 0.0f, 0.0f); }
+    static inline ImMatrix Shear(const ImVec2& p) { return Shear(p.x, p.y); }
+    static inline ImMatrix Shear(float x, float y) { return ImMatrix(1.0f, y, x, 1.0f, 0.0f, 0.0f); }
+    IMGUI_API static ImMatrix Rotation(float angle);
+    static inline ImMatrix Combine(const ImMatrix& lhs, const ImMatrix& rhs) // lhs * rhs = out
+    {
+        return ImMatrix(
+            rhs.m00 * lhs.m00 + rhs.m10 * lhs.m01,
+            rhs.m01 * lhs.m00 + rhs.m11 * lhs.m01,
+            rhs.m00 * lhs.m10 + rhs.m10 * lhs.m11,
+            rhs.m01 * lhs.m10 + rhs.m11 * lhs.m11,
+            rhs.m00 * lhs.m20 + rhs.m10 * lhs.m21 + rhs.m20,
+            rhs.m01 * lhs.m20 + rhs.m11 * lhs.m21 + rhs.m21);
+    }
+    inline void Transform(ImVec2* v, size_t count = 1) const
+    {
+        for (size_t i = 0; i < count; ++i, ++v)
+        {
+            *v = ImVec2(
+                m00 * v->x + m10 * v->y + m20,
+                m01 * v->x + m11 * v->y + m21);
+        }
+    }
+    inline ImVec2 Transformed(const ImVec2& v) const
+    {
+        ImVec2 p = v;
+        Transform(&p);
+        return p;
+    }
+};
 
 //-----------------------------------------------------------------------------
 // [SECTION] Texture identifiers (ImTextureID, ImTextureRef)
@@ -3147,6 +3198,7 @@ IM_NODEBUGSTEP inline ImVec4& operator*=(ImVec4& lhs, const ImVec4& rhs)       {
 IM_NODEBUGSTEP inline ImVec4& operator/=(ImVec4& lhs, const ImVec4& rhs)       { lhs.x /= rhs.x; lhs.y /= rhs.y; lhs.z /= rhs.z; lhs.w /= rhs.w; return lhs; }
 IM_NODEBUGSTEP inline bool    operator==(const ImVec4& lhs, const ImVec4& rhs) { return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z && lhs.w == rhs.w; }
 IM_NODEBUGSTEP inline bool    operator!=(const ImVec4& lhs, const ImVec4& rhs) { return lhs.x != rhs.x || lhs.y != rhs.y || lhs.z != rhs.z || lhs.w != rhs.w; }
+IM_NODEBUGSTEP inline ImMatrix operator*(const ImMatrix& lhs, const ImMatrix& rhs) { return ImMatrix::Combine(lhs, rhs); }
 IM_MSVC_RUNTIME_CHECKS_RESTORE
 #endif
 
@@ -3446,6 +3498,18 @@ struct ImDrawListSplitter
     IMGUI_API void              SetCurrentChannel(ImDrawList* draw_list, int channel_idx);
 };
 
+// [Internal] For use by ImDrawList::PushTransformation()/PopTransformation()
+struct ImDrawTransformation
+{
+    int                     VtxStartIdx;        // Index in VtxBuffer, not relative to VtxOffset
+    ImMatrix                Transformation;     // Maps the vertices of the scope into the parent scope when it is popped
+    ImMatrix                LastTransformation; // Last*: state of the parent scope, restored when it is popped
+    float                   LastInvTransformationScale;
+    float                   LastFringeScale;
+    float                   LastInvFringeScale;
+    bool                    LastFringeScaleIsInteger;
+};
+
 // Flags for ImDrawList functions
 enum ImDrawFlags_
 {
@@ -3503,10 +3567,11 @@ enum ImDrawFlags_
     ImDrawFlags_UseTexForRoundCorners   = 1 << 21,  // --   OK(1)  // Enable using textures instead of strokes to draw rounded corners/circles where possible (faster). Used by default unless 'ImFontAtlasFlags_NoBakedRoundCorners' is enabled in the font atlas.
     ImDrawFlags_UseVtxOffset            = 1 << 22,  // --   OK(1)  // Can emit 'VtxOffset > 0' to allow large meshes with 16-bit ImDrawIdx. Used by default when 'ImGuiBackendFlags_RendererHasVtxOffset' is enabled by the backend.
     ImDrawFlags_AllowTexForRoundCorners_= 1 << 23,  // --   OK(1)  // [Internal]
+    ImDrawFlags_NonScalingStroke        = 1 << 24,  // OK   OK(0)  // Keep stroke thickness in screen pixels under PushTransformation(). By default it scales with the transformation.
 
     // [Internal]
     ImDrawFlags_RoundMask_              = ImDrawFlags_RoundAll | ImDrawFlags_RoundNone, // [Internal]
-    ImDrawFlags_AllowInPushScope_       = ImDrawFlags_AAFill | ImDrawFlags_AALines | ImDrawFlags_AALineEnds | ImDrawFlags_StrokeLegacy | ImDrawFlags_TextNoPixelSnap | ImDrawFlags_UseTexForRoundCorners | ImDrawFlags_UseVtxOffset | ImDrawFlags_RoundMask_, // [Internal] Values allowed in PushDrawFlag() scope.
+    ImDrawFlags_AllowInPushScope_       = ImDrawFlags_AAFill | ImDrawFlags_AALines | ImDrawFlags_AALineEnds | ImDrawFlags_StrokeLegacy | ImDrawFlags_TextNoPixelSnap | ImDrawFlags_UseTexForRoundCorners | ImDrawFlags_UseVtxOffset | ImDrawFlags_RoundMask_ | ImDrawFlags_NonScalingStroke, // [Internal] Values allowed in PushDrawFlag() scope.
     ImDrawFlags_AllowInFrameScope_      = ImDrawFlags_AllowInPushScope_ | ImDrawFlags_AllowTexForRoundCorners_,
     ImDrawFlags_StrokeMask_             = 0x07 << 17,              // [Internal]
     ImDrawFlags_InvalidMask_            = ~0x7FFFFFF0,             // [Internal] == 0x8000000F. Reserved to detect misuses.
@@ -3525,6 +3590,13 @@ enum ImDrawFlags_
     ImDrawFlags_RoundCornersLeft        = ImDrawFlags_RoundLeft,
     ImDrawFlags_RoundCornersRight       = ImDrawFlags_RoundRight,      
 #endif
+};
+
+// Flags for ImDrawList::PushTransformation()
+enum ImDrawTransformationFlags_
+{
+    ImDrawTransformationFlags_None      = 0,
+    ImDrawTransformationFlags_Absolute  = 1 << 0,   // Replace the current transformation instead of combining with it. A singular current transformation (determinant 0) is kept: no matrix maps vertices back into it.
 };
 
 // Draw command list
@@ -3560,6 +3632,9 @@ struct ImDrawList
     float                   _InvFringeScale;    // [internal] 1.0 / _FringeScale // FIXME: Consider renaming to _PixelDensity.
     bool                    _FringeScaleIsInteger;  // [Internal] true if 1/_FringeScale is a whole number, used to select fast path for rendering
     const char*             _OwnerName;         // Pointer to owner window's name for debugging
+    ImVector<ImDrawTransformation> _TransformationStack; // [Internal]
+    ImMatrix                _Transformation;    // [Internal] accumulated transformation, from local to screen coordinates
+    float                   _InvTransformationScale; // [Internal] size of a screen pixel in local units
 
     // If you want to create ImDrawList instances, pass them ImGui::GetDrawListSharedData().
     // (advanced: you may create and use your own ImDrawListSharedData so you can use ImDrawList without ImGui, but that's more involved)
@@ -3575,6 +3650,20 @@ struct ImDrawList
     IMGUI_API void  PopDrawFlag();
     inline ImVec2   GetClipRectMin() const { const ImVec4& cr = _ClipRectStack.back(); return ImVec2(cr.x, cr.y); }
     inline ImVec2   GetClipRectMax() const { const ImVec4& cr = _ClipRectStack.back(); return ImVec2(cr.z, cr.w); }
+
+    // Transformation (IMGUI_HAS_DRAWLIST_TRANSFORMATION)
+    // - PushTransformation() combines 'transformation' with the current one, unless ImDrawTransformationFlags_Absolute is set.
+    // - PopTransformation() transforms in place the vertices added since the matching push, in all channels of a splitter. Until then they are local, e.g. in CloneOutput().
+    // - Coordinates passed to primitives are local, paths included: stroke or fill them in the scope they were built in. Filled shapes need a clockwise winding in local coordinates.
+    // - Stroke thickness scales with the transformation unless ImDrawFlags_NonScalingStroke is set. The AA fringe stays one pixel.
+    //   The fringe, non-scaling strokes and curve tessellation use a single scale, sqrt(|determinant|): they are anisotropic under non-uniform scale or shear.
+    // - Clip rects, including PushClipRect() in a scope, are in screen coordinates. AddText() culls and snaps to pixels accordingly.
+    //   It lays text out as without the transformation, as CalcTextSize() measures it, with glyph bitmaps baked for the scale of the transformation,
+    //   rounded to a quarter octave so that zooming bakes few sizes.
+    // - Dear ImGui does not transform hit testing and coarse culling: do not submit widgets or child windows in a scope.
+    IMGUI_API void  PushTransformation(const ImMatrix& transformation, ImDrawTransformationFlags flags = 0);
+    IMGUI_API void  PopTransformation(int count = 1);
+    inline const ImMatrix& GetTransformation() const { return _Transformation; }   // Local to screen, e.g. GetTransformation().Inverted().Transformed(io.MousePos) is the mouse in local coordinates.
 
     // Primitives
     // - Filled shapes must always use clockwise winding order. The anti-aliasing fringe depends on it. Counter-clockwise shapes will have "inward" anti-aliasing.
@@ -3607,7 +3696,7 @@ struct ImDrawList
     // General polygon
     // - Only simple polygons are supported by filling functions (no self-intersections, no holes).
     // - Concave polygon fill is more expensive than convex one: it has O(N^2) complexity. Provided as a convenience for the user but not used by the main library.
-    inline    void  AddPolyline(const ImVec2* points, int num_points, ImU32 col, float thickness, ImDrawFlags flags = 0) { _AddPolyline(points, num_points, col, thickness, flags, FLT_MAX); }
+    inline    void  AddPolyline(const ImVec2* points, int num_points, ImU32 col, float thickness, ImDrawFlags flags = 0) { _AddPolyline(points, num_points, col, thickness * _GetStrokeScale(flags), flags, FLT_MAX); }
     IMGUI_API void  AddConvexPolyFilled(const ImVec2* points, int num_points, ImU32 col, ImDrawFlags flags = 0);
     IMGUI_API void  AddConcavePolyFilled(const ImVec2* points, int num_points, ImU32 col);
 
@@ -3627,7 +3716,7 @@ struct ImDrawList
     inline    void  PathLineToMergeDuplicate(const ImVec2& pos)                 { if (_Path.Size == 0 || memcmp(&_Path.Data[_Path.Size - 1], &pos, 8) != 0) _Path.push_back(pos); }
     inline    void  PathFillConvex(ImU32 col, ImDrawFlags flags = 0)            { AddConvexPolyFilled(_Path.Data, _Path.Size, col, flags); _Path.Size = 0; }
     inline    void  PathFillConcave(ImU32 col)                                  { AddConcavePolyFilled(_Path.Data, _Path.Size, col); _Path.Size = 0; }
-    inline    void  PathStroke(ImU32 col, float thickness = 1.0f, ImDrawFlags flags = 0) { _AddPolyline(_Path.Data, _Path.Size, col, thickness, flags, FLT_MAX); _Path.Size = 0; }
+    inline    void  PathStroke(ImU32 col, float thickness = 1.0f, ImDrawFlags flags = 0) { _AddPolyline(_Path.Data, _Path.Size, col, thickness * _GetStrokeScale(flags), flags, FLT_MAX); _Path.Size = 0; }
     IMGUI_API void  PathArcTo(const ImVec2& center, float radius, float a_min, float a_max, int num_segments = 0);
     IMGUI_API void  PathArcToFast(const ImVec2& center, float radius, int a_min_of_12, int a_max_of_12);                // Use precomputed angles for a 12 steps circle
     IMGUI_API void  PathEllipticalArcTo(const ImVec2& center, const ImVec2& radius, float rot, float a_min, float a_max, int num_segments = 0); // Ellipse
@@ -3712,6 +3801,8 @@ struct ImDrawList
     IMGUI_API void  _SelectLineTexture(float screen_thickness, ImVec2* out_uv0, ImVec2* out_uv1, float* out_fringe, ImDrawFlags flags);
     IMGUI_API float _CalculateCenterBiasedOffset(float thickness);
     IMGUI_API void  _AddPolyline(const ImVec2* points, int num_points, ImU32 col, float thickness, ImDrawFlags flags, float max_inner_offset);
+    inline    float _GetStrokeScale(ImDrawFlags flags) const { return ((flags | Flags) & ImDrawFlags_NonScalingStroke) ? _InvTransformationScale : 1.0f; } // Local units per unit of stroke thickness
+    IMGUI_API void  _AddTransformedText(ImFont* font, float font_size, const ImVec2& pos, ImU32 col, const char* text_begin, const char* text_end, float wrap_width, const ImVec4* cpu_fine_clip_rect);
 };
 
 // All draw data to render a Dear ImGui frame
