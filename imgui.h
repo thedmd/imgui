@@ -1005,12 +1005,54 @@ enum ImGuiKey_
     ImGuiKey_Space,
     ImGuiKey_Enter,
     ImGuiKey_Escape,
+    ImGuiKey_0,         //
+    ImGuiKey_1,         //
+    ImGuiKey_2,         //
+    ImGuiKey_3,         //
+    ImGuiKey_4,         //
+    ImGuiKey_5,         //
+    ImGuiKey_6,         //
+    ImGuiKey_7,         //
+    ImGuiKey_8,         //
+    ImGuiKey_9,         //
     ImGuiKey_A,         // for text edit CTRL+A: select all
+    ImGuiKey_B,         //
     ImGuiKey_C,         // for text edit CTRL+C: copy
+    ImGuiKey_D,         //
+    ImGuiKey_E,         //
+    ImGuiKey_F,         //
+    ImGuiKey_G,         //
+    ImGuiKey_H,         //
+    ImGuiKey_I,         //
+    ImGuiKey_J,         //
+    ImGuiKey_K,         //
+    ImGuiKey_L,         //
+    ImGuiKey_M,         //
+    ImGuiKey_N,         //
+    ImGuiKey_O,         //
+    ImGuiKey_P,         //
+    ImGuiKey_Q,         //
+    ImGuiKey_R,         //
+    ImGuiKey_S,         //
+    ImGuiKey_T,         //
+    ImGuiKey_U,         //
     ImGuiKey_V,         // for text edit CTRL+V: paste
+    ImGuiKey_W,         //
     ImGuiKey_X,         // for text edit CTRL+X: cut
     ImGuiKey_Y,         // for text edit CTRL+Y: redo
     ImGuiKey_Z,         // for text edit CTRL+Z: undo
+    ImGuiKey_F1,        //
+    ImGuiKey_F2,        //
+    ImGuiKey_F3,        //
+    ImGuiKey_F4,        //
+    ImGuiKey_F5,        //
+    ImGuiKey_F6,        //
+    ImGuiKey_F7,        //
+    ImGuiKey_F8,        //
+    ImGuiKey_F9,        //
+    ImGuiKey_F10,       //
+    ImGuiKey_F11,       //
+    ImGuiKey_F12,       //
     ImGuiKey_COUNT
 };
 
