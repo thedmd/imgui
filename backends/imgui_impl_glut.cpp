@@ -65,12 +65,54 @@ bool ImGui_ImplGLUT_Init()
     io.KeyMap[ImGuiKey_Enter]       = 13; // == CTRL+M
     io.KeyMap[ImGuiKey_Escape]      = 27;
     io.KeyMap[ImGuiKey_KeyPadEnter] = 13; // == CTRL+M
+    io.KeyMap[ImGuiKey_0]           = '0';
+    io.KeyMap[ImGuiKey_1]           = '1';
+    io.KeyMap[ImGuiKey_2]           = '2';
+    io.KeyMap[ImGuiKey_3]           = '3';
+    io.KeyMap[ImGuiKey_4]           = '4';
+    io.KeyMap[ImGuiKey_5]           = '5';
+    io.KeyMap[ImGuiKey_6]           = '6';
+    io.KeyMap[ImGuiKey_7]           = '7';
+    io.KeyMap[ImGuiKey_8]           = '8';
+    io.KeyMap[ImGuiKey_9]           = '9';
     io.KeyMap[ImGuiKey_A]           = 'A';
+    io.KeyMap[ImGuiKey_B]           = 'B';
     io.KeyMap[ImGuiKey_C]           = 'C';
+    io.KeyMap[ImGuiKey_D]           = 'D';
+    io.KeyMap[ImGuiKey_E]           = 'E';
+    io.KeyMap[ImGuiKey_F]           = 'F';
+    io.KeyMap[ImGuiKey_G]           = 'G';
+    io.KeyMap[ImGuiKey_H]           = 'H';
+    io.KeyMap[ImGuiKey_I]           = 'I';
+    io.KeyMap[ImGuiKey_J]           = 'J';
+    io.KeyMap[ImGuiKey_K]           = 'K';
+    io.KeyMap[ImGuiKey_L]           = 'L';
+    io.KeyMap[ImGuiKey_M]           = 'M';
+    io.KeyMap[ImGuiKey_N]           = 'N';
+    io.KeyMap[ImGuiKey_O]           = 'O';
+    io.KeyMap[ImGuiKey_P]           = 'P';
+    io.KeyMap[ImGuiKey_Q]           = 'Q';
+    io.KeyMap[ImGuiKey_R]           = 'R';
+    io.KeyMap[ImGuiKey_S]           = 'S';
+    io.KeyMap[ImGuiKey_T]           = 'T';
+    io.KeyMap[ImGuiKey_U]           = 'U';
     io.KeyMap[ImGuiKey_V]           = 'V';
+    io.KeyMap[ImGuiKey_W]           = 'W';
     io.KeyMap[ImGuiKey_X]           = 'X';
     io.KeyMap[ImGuiKey_Y]           = 'Y';
     io.KeyMap[ImGuiKey_Z]           = 'Z';
+    io.KeyMap[ImGuiKey_F1]          = 256 + GLUT_KEY_F1;
+    io.KeyMap[ImGuiKey_F2]          = 256 + GLUT_KEY_F2;
+    io.KeyMap[ImGuiKey_F3]          = 256 + GLUT_KEY_F3;
+    io.KeyMap[ImGuiKey_F4]          = 256 + GLUT_KEY_F4;
+    io.KeyMap[ImGuiKey_F5]          = 256 + GLUT_KEY_F5;
+    io.KeyMap[ImGuiKey_F6]          = 256 + GLUT_KEY_F6;
+    io.KeyMap[ImGuiKey_F7]          = 256 + GLUT_KEY_F7;
+    io.KeyMap[ImGuiKey_F8]          = 256 + GLUT_KEY_F8;
+    io.KeyMap[ImGuiKey_F9]          = 256 + GLUT_KEY_F9;
+    io.KeyMap[ImGuiKey_F10]         = 256 + GLUT_KEY_F10;
+    io.KeyMap[ImGuiKey_F11]         = 256 + GLUT_KEY_F11;
+    io.KeyMap[ImGuiKey_F12]         = 256 + GLUT_KEY_F12;
 
     return true;
 }
