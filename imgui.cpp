@@ -1518,6 +1518,7 @@ ImGuiStyle::ImGuiStyle()
     ScrollbarPadding            = 2.0f;             // Padding of scrollbar grab within its frame (same for both axes)
     GrabMinSize                 = 12.0f;            // Minimum width/height of a grab box for slider/scrollbar
     GrabRounding                = 0.0f;             // Radius of grabs corners rounding. Set to 0.0f to have rectangular slider grabs.
+    LayoutAlign                 = 0.5f;             // Element alignment inside horizontal and vertical layouts (0.0f - left/top, 1.0f - right/bottom, 0.5f - center).
     LogSliderDeadzone           = 4.0f;             // The size in pixels of the dead-zone around zero on logarithmic sliders that cross zero.
     ImageRounding               = 0.0f;             // Rounding of Image() calls.
     ImageBorderSize             = 0.0f;             // Thickness of border around tabs.
@@ -3728,6 +3729,7 @@ static const ImGuiStyleVarInfo GStyleVarsInfo[] =
     { 2, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, SeparatorTextAlign) },        // ImGuiStyleVar_SeparatorTextAlign
     { 2, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, SeparatorTextPadding) },      // ImGuiStyleVar_SeparatorTextPadding
     { 1, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, DockingSeparatorSize) },      // ImGuiStyleVar_DockingSeparatorSize
+    { 1, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, LayoutAlign) },               // ImGuiStyleVar_LayoutAlign
 };
 
 const ImGuiStyleVarInfo* ImGui::GetStyleVarInfo(ImGuiStyleVar idx)
@@ -11690,6 +11692,9 @@ void    ImGui::ErrorRecoveryTryToRecoverWindowState(const ImGuiErrorRecoveryStat
         IM_ASSERT_USER_ERROR(0, "Missing EndMultiSelect()");
         EndMultiSelect();
     }
+#ifdef IMGUI_HAS_STACK_LAYOUT
+    ImGuiInternal::LayoutErrorRecoveryTryToRecoverWindowState(window->ID);
+#endif
     if (window->DC.MenuBarAppending) //-V1044
     {
         IM_ASSERT_USER_ERROR(0, "Missing EndMenuBar()");
@@ -11945,6 +11950,10 @@ bool ImGui::ItemAdd(const ImRect& bb, ImGuiID id, const ImRect* nav_bb_arg, ImGu
     g.NextItemData.HasFlags = ImGuiNextItemDataFlags_None;
     g.NextItemData.ItemFlags = ImGuiItemFlags_None;
 
+#ifdef IMGUI_HAS_STACK_LAYOUT
+    ImGuiInternal::UpdateItemRect(window->ID, bb.Min, bb.Max);
+#endif
+
 #ifdef IMGUI_ENABLE_TEST_ENGINE
     if (id != 0)
         IMGUI_TEST_ENGINE_ITEM_ADD(id, g.LastItemData.NavRect, &g.LastItemData);
@@ -12044,6 +12053,38 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
     if (window->SkipItems)
         return;
 
+#ifdef IMGUI_HAS_STACK_LAYOUT
+    ImGuiLayoutType layout_type = ImGuiInternal::GetCurrentLayoutType(window->ID);
+#else
+    ImGuiLayoutType layout_type = window->DC.LayoutType;
+#endif
+
+    //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorPos, 3.0f, IM_COL32(255,255,0,255), 4); // [DEBUG] Widget position
+
+    // Stack Layouts: Handle horizontal case first to simplify merge in case code handling vertical changes.
+    if (layout_type == ImGuiLayoutType_Horizontal)
+    {
+        const float line_width = ImMax(window->DC.CurrLineSize.x, size.x);
+
+        // Always align ourselves on pixel boundaries
+        //if (g.IO.KeyAlt) window->DrawList->AddRect(window->DC.CursorPos, window->DC.CursorPos + ImVec2(size.x, line_height), IM_COL32(255,0,0,200)); // [DEBUG]
+        window->DC.CursorPosPrevLine.x = window->DC.CursorPos.x;
+        window->DC.CursorPosPrevLine.y = window->DC.CursorPos.y + size.y;
+        window->DC.CursorPos.x = IM_TRUNC(window->DC.CursorPos.x + line_width + g.Style.ItemSpacing.x);
+        window->DC.CursorPos.y = IM_TRUNC(window->DC.CursorPosPrevLine.y - size.y);
+        window->DC.CursorMaxPos.x = ImMax(window->DC.CursorMaxPos.x, window->DC.CursorPos.x - g.Style.ItemSpacing.x);
+        window->DC.CursorMaxPos.y = ImMax(window->DC.CursorMaxPos.y, window->DC.CursorPosPrevLine.y);
+        //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorMaxPos, 3.0f, IM_COL32(255,0,0,255), 4); // [DEBUG]
+
+        window->DC.PrevLineSize.x = line_width;
+        window->DC.PrevLineSize.y = 0.0f;
+        window->DC.CurrLineSize.x = 0.0f;
+        window->DC.PrevLineTextBaseOffset = ImMax(window->DC.CurrLineTextBaseOffset, text_baseline_y);
+        window->DC.CurrLineTextBaseOffset = window->DC.PrevLineTextBaseOffset;
+        window->DC.IsSameLine = window->DC.IsSetPos = false;
+        return;
+    }
+
     // We increase the height in this function to accommodate for baseline offset.
     // In theory we should be offsetting the starting position (window->DC.CursorPos), that will be the topic of a larger refactor,
     // but since ItemSize() is not yet an API that moves the cursor (to handle e.g. wrapping) enlarging the height has the same effect.
@@ -12062,15 +12103,12 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
     window->DC.CursorMaxPos.y = ImMax(window->DC.CursorMaxPos.y, window->DC.CursorPos.y - g.Style.ItemSpacing.y);
     //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorMaxPos, 3.0f, IM_COL32(255,0,0,255), 4); // [DEBUG]
 
+    window->DC.PrevLineSize.x = 0.0f;
     window->DC.PrevLineSize.y = line_height;
     window->DC.CurrLineSize.y = 0.0f;
     window->DC.PrevLineTextBaseOffset = ImMax(window->DC.CurrLineTextBaseOffset, text_baseline_y);
     window->DC.CurrLineTextBaseOffset = 0.0f;
     window->DC.IsSameLine = window->DC.IsSetPos = false;
-
-    // Horizontal layout mode
-    if (window->DC.LayoutType == ImGuiLayoutType_Horizontal)
-        SameLine();
 }
 IM_MSVC_RUNTIME_CHECKS_RESTORE
 

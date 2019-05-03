@@ -11,6 +11,7 @@ Index of this file:
 // [SECTION] Forward declarations
 // [SECTION] Context pointer
 // [SECTION] STB libraries includes
+// [SECTION] Stack Layout includes
 // [SECTION] Macros
 // [SECTION] Generic helpers
 // [SECTION] ImDrawList support
@@ -232,6 +233,14 @@ typedef ImU16 ImGuiTableDrawChannelIdx;
 extern IMGUI_API ImGuiContext* GImGui;  // Current implicit context pointer
 #endif
 
+//-------------------------------------------------------------------------
+// [SECTION] Stack Layout includes
+//-------------------------------------------------------------------------
+
+#ifdef IMGUI_HAS_STACK_LAYOUT
+# include "imgui_stacklayout_internal.h"
+#endif
+
 //-----------------------------------------------------------------------------
 // [SECTION] Macros
 //-----------------------------------------------------------------------------
@@ -289,7 +298,7 @@ extern IMGUI_API ImGuiContext* GImGui;  // Current implicit context pointer
 #define IM_F32_TO_INT8_UNBOUND(_VAL)    ((int)((_VAL) * 255.0f + ((_VAL)>=0 ? 0.5f : -0.5f)))   // Unsaturated, for display purpose
 #define IM_F32_TO_INT8_SAT(_VAL)        ((int)(ImSaturate(_VAL) * 255.0f + 0.5f))               // Saturated, always output 0..255
 #define IM_TRUNC(_VAL)                  ((float)(int)(_VAL))                                    // Positive values only! ImTrunc() is not inlined in MSVC debug builds
-#define IM_ROUND(_VAL)                  ((float)(int)((_VAL) + 0.5f))                           // Positive values only! 
+#define IM_ROUND(_VAL)                  ((float)(int)((_VAL) + 0.5f))                           // Positive values only!
 //#define IM_FLOOR IM_TRUNC             // [OBSOLETE] Renamed in 1.90.0 (Sept 2023)
 
 // Hint for branch prediction
