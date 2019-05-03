@@ -1610,6 +1610,7 @@ ImGuiStyle::ImGuiStyle()
     ScrollbarPadding            = 2.0f;             // Padding of scrollbar grab within its frame (same for both axes)
     GrabMinSize                 = 12.0f;            // Minimum width/height of a grab box for slider/scrollbar
     GrabRounding                = 0.0f;             // Radius of grabs corners rounding. Set to 0.0f to have rectangular slider grabs.
+    LayoutAlign                 = 0.5f;             // Element alignment inside horizontal and vertical layouts (0.0f - left/top, 1.0f - right/bottom, 0.5f - center).
     LogSliderDeadzone           = 4.0f;             // The size in pixels of the dead-zone around zero on logarithmic sliders that cross zero.
     ImageRounding               = 0.0f;             // Rounding of Image() calls.
     ImageBorderSize             = 0.0f;             // Thickness of border around Image() calls.
@@ -3884,6 +3885,7 @@ static const ImGuiStyleVarInfo GStyleVarsInfo[] =
     { 2, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, SeparatorTextAlign) },        // ImGuiStyleVar_SeparatorTextAlign
     { 2, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, SeparatorTextPadding) },      // ImGuiStyleVar_SeparatorTextPadding
     { 1, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, DockingSeparatorSize) },      // ImGuiStyleVar_DockingSeparatorSize
+    { 1, ImGuiDataType_Float, (ImU32)offsetof(ImGuiStyle, LayoutAlign) },               // ImGuiStyleVar_LayoutAlign
 };
 
 const ImGuiStyleVarInfo* ImGui::GetStyleVarInfo(ImGuiStyleVar idx)
@@ -12036,6 +12038,9 @@ void    ImGui::ErrorRecoveryTryToRecoverWindowState(const ImGuiErrorRecoveryStat
         IM_ASSERT_USER_ERROR(0, "Missing EndMultiSelect()");
         EndMultiSelect();
     }
+#ifdef IMGUI_HAS_STACK_LAYOUT
+    ImGuiStackLayout::ErrorRecoveryTryToRecoverWindowState(state_in);
+#endif
     if (window->DC.MenuBarAppending) //-V1044
     {
         IM_ASSERT_USER_ERROR(0, "Missing EndMenuBar()");
