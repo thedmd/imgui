@@ -370,6 +370,18 @@ namespace ImGui
     IMGUI_API float         GetFrameHeight();                                               // ~ FontSize + style.FramePadding.y * 2
     IMGUI_API float         GetFrameHeightWithSpacing();                                    // ~ FontSize + style.FramePadding.y * 2 + style.ItemSpacing.y (distance in pixels between 2 consecutive lines of framed widgets)
 
+    IMGUI_API void          BeginHorizontal(const char* str_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
+    IMGUI_API void          BeginHorizontal(const void* ptr_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
+    IMGUI_API void          BeginHorizontal(int id, const ImVec2& size = ImVec2(0, 0), float align = -1);
+    IMGUI_API void          EndHorizontal();
+    IMGUI_API void          BeginVertical(const char* str_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
+    IMGUI_API void          BeginVertical(const void* ptr_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
+    IMGUI_API void          BeginVertical(int id, const ImVec2& size = ImVec2(0, 0), float align = -1);
+    IMGUI_API void          EndVertical();
+    IMGUI_API void          Spring(float weight = 1.0f, float spacing = -1.0f);
+    IMGUI_API void          SuspendLayout();
+    IMGUI_API void          ResumeLayout();
+
     // ID stack/scopes
     // - Read the FAQ for more details about how ID are handled in dear imgui. If you are creating widgets in a loop you most
     //   likely want to push a unique identifier (e.g. object pointer, loop index) to uniquely differentiate them.
@@ -1171,6 +1183,7 @@ enum ImGuiStyleVar_
     ImGuiStyleVar_TabRounding,         // float     TabRounding
     ImGuiStyleVar_ButtonTextAlign,     // ImVec2    ButtonTextAlign
     ImGuiStyleVar_SelectableTextAlign, // ImVec2    SelectableTextAlign
+    ImGuiStyleVar_LayoutAlign,         // float     LayoutAlign
     ImGuiStyleVar_COUNT
 
     // Obsolete names (will be removed)
@@ -1370,6 +1383,7 @@ struct ImGuiStyle
     float       ScrollbarRounding;          // Radius of grab corners for scrollbar.
     float       GrabMinSize;                // Minimum width/height of a grab box for slider/scrollbar.
     float       GrabRounding;               // Radius of grabs corners rounding. Set to 0.0f to have rectangular slider grabs.
+    float       LayoutAlign;                // Element alignment inside horizontal and vertical layouts (0.0f - left/top, 1.0f - right/bottom, 0.5f - center).
     float       TabRounding;                // Radius of upper corners of a tab. Set to 0.0f to have rectangular tabs.
     float       TabBorderSize;              // Thickness of border around tabs.
     ImVec2      ButtonTextAlign;            // Alignment of button text when button is larger than text. Defaults to (0.5f, 0.5f) (centered).
