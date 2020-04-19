@@ -135,6 +135,13 @@ bool    ImGui_ImplWin32_Init(void* hwnd)
     io.KeyMap[ImGuiKey_X] = 'X';
     io.KeyMap[ImGuiKey_Y] = 'Y';
     io.KeyMap[ImGuiKey_Z] = 'Z';
+    io.KeyMap[ImGuiKey_Q] = 'Q';
+    io.KeyMap[ImGuiKey_D] = 'D';
+    io.KeyMap[ImGuiKey_W] = 'W';
+    io.KeyMap[ImGuiKey_S] = 'S';
+    io.KeyMap[ImGuiKey_F] = 'F';
+    io.KeyMap[ImGuiKey_E] = 'E';
+    io.KeyMap[ImGuiKey_R] = 'R';
 
     ImGui_ImplWin32_UpdateScancodes();
 
