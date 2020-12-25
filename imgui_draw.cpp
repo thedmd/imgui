@@ -438,6 +438,7 @@ void ImDrawList::_ResetForNewFrame()
     _Path.resize(0);
     _Splitter.Clear();
     CmdBuffer.push_back(ImDrawCmd());
+    _FringeScale = 1.0f;
     _TransformationStack.resize(0);
     _InvTransformationScale = 1.0f;
     _HalfPixel = ImVec2(0.5f, 0.5f);
@@ -791,7 +792,7 @@ void ImDrawList::AddPolyline(const ImVec2* points, const int points_count, ImU32
     if (points_count < 2)
         return;
 
-    thickness *= _InvTransformationScale;
+    thickness *= _InvTransformationScale * _FringeScale;
 
     const ImVec2 opaque_uv = _Data->TexUvWhitePixel;
     const int count = closed ? points_count : points_count - 1; // The number of line segments we need to draw
@@ -800,7 +801,7 @@ void ImDrawList::AddPolyline(const ImVec2* points, const int points_count, ImU32
     if (Flags & ImDrawListFlags_AntiAliasedLines)
     {
         // Anti-aliased stroke
-        const float AA_SIZE = _InvTransformationScale;
+        const float AA_SIZE = _InvTransformationScale * _FringeScale;
         const ImU32 col_trans = col & ~IM_COL32_A_MASK;
 
         // Thicknesses <1.0 should behave like thickness 1.0
@@ -1054,7 +1055,7 @@ void ImDrawList::AddConvexPolyFilled(const ImVec2* points, const int points_coun
     {
         // Anti-aliased Fill
         const float DIRECTION = (((_HalfPixel.x < 0.0f) ^ (_HalfPixel.y < 0.0f)) ? -1.0f : 1.0f);
-        const float AA_SIZE = _InvTransformationScale * DIRECTION;
+        const float AA_SIZE = _InvTransformationScale * _FringeScale * DIRECTION;
         const ImU32 col_trans = col & ~IM_COL32_A_MASK;
         const int idx_count = (points_count - 2)*3 + points_count * 6;
         const int vtx_count = (points_count * 2);
