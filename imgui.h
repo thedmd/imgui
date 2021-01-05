@@ -1289,6 +1289,7 @@ enum ImGuiSortDirection_
 // User fill ImGuiIO.KeyMap[] array with indices into the ImGuiIO.KeysDown[512] array
 enum ImGuiKey_
 {
+    ImGuiKey_None,
     ImGuiKey_Tab,
     ImGuiKey_LeftArrow,
     ImGuiKey_RightArrow,
@@ -1304,7 +1305,48 @@ enum ImGuiKey_
     ImGuiKey_Space,
     ImGuiKey_Enter,
     ImGuiKey_Escape,
+    ImGuiKey_Apostrophe,     // '
+    ImGuiKey_Comma,          // ,
+    ImGuiKey_Minus,          // -
+    ImGuiKey_Period,         // .
+    ImGuiKey_Slash,          // /
+    ImGuiKey_Semicolon,      // ;
+    ImGuiKey_Equal,          // =
+    ImGuiKey_LeftBracket,    // [
+    ImGuiKey_Backslash,      // \ (this text inhibit multiline comment caused by backlash)
+    ImGuiKey_RightBracket,   // ]
+    ImGuiKey_GraveAccent,    // `
+    ImGuiKey_CapsLock,
+    ImGuiKey_ScrollLock,
+    ImGuiKey_NumLock,
+    ImGuiKey_PrintScreen,
+    ImGuiKey_Pause,
+    ImGuiKey_KeyPad0,
+    ImGuiKey_KeyPad1,
+    ImGuiKey_KeyPad2,
+    ImGuiKey_KeyPad3,
+    ImGuiKey_KeyPad4,
+    ImGuiKey_KeyPad5,
+    ImGuiKey_KeyPad6,
+    ImGuiKey_KeyPad7,
+    ImGuiKey_KeyPad8,
+    ImGuiKey_KeyPad9,
+    ImGuiKey_KeyPadDecimal,
+    ImGuiKey_KeyPadDivide,
+    ImGuiKey_KeyPadMultiply,
+    ImGuiKey_KeyPadSubtract,
+    ImGuiKey_KeyPadAdd,
     ImGuiKey_KeyPadEnter,
+    ImGuiKey_KeyPadEqual,
+    ImGuiKey_LeftShift,
+    ImGuiKey_LeftControl,
+    ImGuiKey_LeftAlt,
+    ImGuiKey_LeftSuper,
+    ImGuiKey_RightShift,
+    ImGuiKey_RightControl,
+    ImGuiKey_RightAlt,
+    ImGuiKey_RightSuper,
+    ImGuiKey_Menu,
     ImGuiKey_0,         //
     ImGuiKey_1,         //
     ImGuiKey_2,         //
