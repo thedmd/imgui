@@ -389,15 +389,10 @@ ImMatrix ImMatrix::Rotation(float angle)
     return ImMatrix(c, s, -s, c, 0.0f, 0.0f);
 }
 
-ImMatrix ImMatrix::Shearing(float angle, Direction direction)
+ImMatrix ImMatrix::Shearing(float x, float y)
 {
-    const float t = tanf(angle);
-
-    if(direction == Direction::In_X_Direction)
-        return ImMatrix(1.0f, 0.0f, t, 1.0f, 0.0f, 0.0f);
-
-    return ImMatrix(1.0f, t, 0.0f, 1.0f, 0.0f, 0.0f);
-};
+    return ImMatrix(1.0f, y, x, 1.0f, 0.0f, 0.0f);
+}
 //-----------------------------------------------------------------------------
 // [SECTION] ImDrawList
 //-----------------------------------------------------------------------------
