@@ -252,6 +252,11 @@ struct ImMatrix
     IM_MATRIX_CLASS_EXTRA
 #endif
 
+    enum class Direction {
+        In_X_Direction,
+        In_Y_Direction,
+    };    
+        
     ImMatrix Inverted() const;
 
     static inline ImMatrix Translation(const ImVec2& p) { return Translation(p.x, p.y); }
@@ -259,6 +264,7 @@ struct ImMatrix
     static inline ImMatrix Scaling(const ImVec2& p) { return Scaling(p.x, p.y); }
     static inline ImMatrix Scaling(float x, float y) { return ImMatrix(x, 0.0f, 0.0f, y, 0.0f, 0.0f); }
     IMGUI_API static ImMatrix Rotation(float angle);
+    IMGUI_API static ImMatrix Shearing(float angle, Direction direction);
     static inline ImMatrix Combine(const ImMatrix& lhs, const ImMatrix& rhs) // lhs * rhs = out
     {
         return ImMatrix(
