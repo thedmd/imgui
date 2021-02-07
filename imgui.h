@@ -2229,6 +2229,8 @@ struct ImDrawCmd
     void*           UserCallbackData;   // 4-8  // The draw callback code can access this.
 
     ImDrawCmd() { memset(this, 0, sizeof(*this)); } // Also ensure our padding fields are zeroed
+
+    inline ImTextureID GetTexID() const { return TextureId; } // Returns ImTextureID associated with this draw call. Warning: Don't assume this is always same as 'TextureId'.
 };
 
 // Vertex index, default to 16-bit

@@ -522,8 +522,8 @@ void ImGui_ImplMetal_DestroyDeviceObjects()
 
 
                     // Bind texture, Draw
-                    if (pcmd->TextureId != NULL)
-                        [commandEncoder setFragmentTexture:(__bridge id<MTLTexture>)(pcmd->TextureId) atIndex:0];
+                    if (ImTextureID tex_id = pcmd->GetTexID())
+                        [commandEncoder setFragmentTexture:(__bridge id<MTLTexture>)(tex_id) atIndex:0];
 
                     [commandEncoder setVertexBufferOffset:(vertexBufferOffset + pcmd->VtxOffset * sizeof(ImDrawVert)) atIndex:0];
                     [commandEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
