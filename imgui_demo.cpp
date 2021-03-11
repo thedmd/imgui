@@ -81,8 +81,6 @@ Index of this file:
 
 #include "imgui_internal.h"
 #include <chrono>
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h>
 
 static uint64_t ImTimeGetInMicroseconds()
 {
@@ -7881,8 +7879,8 @@ static void ShowExampleAppCustomRendering(bool* p_open)
 
                     for (int step_index = 0; step_index < test.Steps; ++step_index)
                     {
-                        stats.appendf("%" PRIu64 ";", *total_vertex_count_stats_in++ / (uint64_t)M);
-                        stats.appendf("%" PRIu64 ";", *total_duration_stats_in++     / (uint64_t)M);
+                        stats.appendf("%" IM_PRIu64 ";", *total_vertex_count_stats_in++ / (uint64_t)M);
+                        stats.appendf("%" IM_PRIu64 ";", *total_duration_stats_in++     / (uint64_t)M);
                     }
                 }
 
