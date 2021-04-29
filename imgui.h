@@ -2243,9 +2243,9 @@ struct ImTexture
     ImTextureType       Type;
     unsigned short      FontAtlasPage;
 
-    ImTexture() {};
-    explicit ImTexture(ImFontAtlas* font_atlas): FontAtlas(font_atlas), Type(ImTextureType_Atlas), FontAtlasPage(0) {}
-    explicit ImTexture(ImTextureID texture_id): TextureId(texture_id), Type(ImTextureType_UserID), FontAtlasPage(0) {}
+    ImTexture() {}
+    explicit ImTexture(ImFontAtlas* font_atlas);
+    explicit ImTexture(ImTextureID texture_id);
 
     inline friend bool operator==(const ImTexture& lhs, const ImTexture& rhs) { return memcmp(&lhs, &rhs, sizeof(ImTexture)) == 0; }
     inline friend bool operator!=(const ImTexture& lhs, const ImTexture& rhs) { return !(lhs == rhs); }
@@ -2393,8 +2393,10 @@ struct ImDrawList
     IMGUI_API void  PushClipRect(ImVec2 clip_rect_min, ImVec2 clip_rect_max, bool intersect_with_current_clip_rect = false);  // Render-level scissoring. This is passed down to your render function but not used for CPU-side coarse clipping. Prefer using higher-level ImGui::PushClipRect() to affect logic (hit-testing and widget culling)
     IMGUI_API void  PushClipRectFullScreen();
     IMGUI_API void  PopClipRect();
-    IMGUI_API void  PushTextureID(ImTextureID texture_id);
-    IMGUI_API void  PopTextureID();
+    IMGUI_API void  PushTexture(ImTexture texture);
+    IMGUI_API void  PopTexture();
+    IMGUI_API void  PushTextureID(ImTextureID texture_id);  // DEPRECATED???
+    IMGUI_API void  PopTextureID();                         // DEPRECATED???
     inline ImVec2   GetClipRectMin() const { const ImVec4& cr = _ClipRectStack.back(); return ImVec2(cr.x, cr.y); }
     inline ImVec2   GetClipRectMax() const { const ImVec4& cr = _ClipRectStack.back(); return ImVec2(cr.z, cr.w); }
 
@@ -2427,8 +2429,11 @@ struct ImDrawList
     // - Read FAQ to understand what ImTextureID is.
     // - "p_min" and "p_max" represent the upper-left and lower-right corners of the rectangle.
     // - "uv_min" and "uv_max" represent the normalized texture coordinates to use for those corners. Using (0,0)->(1,1) texture coordinates will generally display the entire texture.
+    IMGUI_API void  AddImage(ImTexture texture, const ImVec2& p_min, const ImVec2& p_max, const ImVec2& uv_min = ImVec2(0, 0), const ImVec2& uv_max = ImVec2(1, 1), ImU32 col = IM_COL32_WHITE);
     IMGUI_API void  AddImage(ImTextureID user_texture_id, const ImVec2& p_min, const ImVec2& p_max, const ImVec2& uv_min = ImVec2(0, 0), const ImVec2& uv_max = ImVec2(1, 1), ImU32 col = IM_COL32_WHITE);
+    IMGUI_API void  AddImageQuad(ImTexture texture, const ImVec2& p1, const ImVec2& p2, const ImVec2& p3, const ImVec2& p4, const ImVec2& uv1 = ImVec2(0, 0), const ImVec2& uv2 = ImVec2(1, 0), const ImVec2& uv3 = ImVec2(1, 1), const ImVec2& uv4 = ImVec2(0, 1), ImU32 col = IM_COL32_WHITE);
     IMGUI_API void  AddImageQuad(ImTextureID user_texture_id, const ImVec2& p1, const ImVec2& p2, const ImVec2& p3, const ImVec2& p4, const ImVec2& uv1 = ImVec2(0, 0), const ImVec2& uv2 = ImVec2(1, 0), const ImVec2& uv3 = ImVec2(1, 1), const ImVec2& uv4 = ImVec2(0, 1), ImU32 col = IM_COL32_WHITE);
+    IMGUI_API void  AddImageRounded(ImTexture texture, const ImVec2& p_min, const ImVec2& p_max, const ImVec2& uv_min, const ImVec2& uv_max, ImU32 col, float rounding, ImDrawFlags flags = 0);
     IMGUI_API void  AddImageRounded(ImTextureID user_texture_id, const ImVec2& p_min, const ImVec2& p_max, const ImVec2& uv_min, const ImVec2& uv_max, ImU32 col, float rounding, ImDrawFlags flags = 0);
 
     // Stateful path API, add points then finish with PathFillConvex() or PathStroke()
@@ -2606,6 +2611,32 @@ enum ImFontAtlasFlags_
 //   You can set font_cfg->FontDataOwnedByAtlas=false to keep ownership of your data and it won't be freed,
 // - Even though many functions are suffixed with "TTF", OTF data is supported just as well.
 // - This is an old API and it is currently awkward for those and and various other reasons! We will address them in the future!
+typedef unsigned int ImTextureFormat;
+
+enum ImTextureFormat_
+{
+    ImTextureFormat_Alpha8, // 1 component per pixel, each component is unsigned 8-bit. Total size = TexWidth * TexHeight
+    ImTextureFormat_RGBA32  // 4 component per pixel, each component is unsigned 8-bit. Total size = TexWidth * TexHeight * 4
+};
+
+struct ImTextureData
+{
+    IMGUI_API ImTextureData();
+    IMGUI_API ~ImTextureData();
+    IMGUI_API void              AllocatePixels(int width, int height, ImTextureFormat format, bool clear = true);
+    IMGUI_API void              DiscardPixels();
+    IMGUI_API void              EnsureFormat(ImTextureFormat format);
+
+    void                        SetTexID(ImTextureID tex_id) { TexID = tex_id; }
+    ImTextureID                 GetTexID() const { return TexID; }
+
+    ImTextureID                 TexID;
+    ImTextureFormat             TexFormat;
+    void*                       TexPixels;
+    int                         TexWidth;
+    int                         TexHeight;
+};
+
 struct ImFontAtlas
 {
     IMGUI_API ImFontAtlas();
@@ -2630,8 +2661,9 @@ struct ImFontAtlas
     IMGUI_API bool              IsDirty(); // Returns true if the font needs to be (re-)built. User code should call GetTexData*** and update either the whole texture or dirty region as required.
     IMGUI_API void              GetTexDataAsAlpha8(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel = NULL);  // 1 byte per-pixel
     IMGUI_API void              GetTexDataAsRGBA32(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel = NULL);  // 4 bytes-per-pixel
-    bool                        IsBuilt() const             { return Fonts.Size > 0 && (TexPixelsAlpha8 != NULL || TexPixelsRGBA32 != NULL); }
-    void                        SetTexID(ImTextureID id)    { TexID = id; }
+    bool                        IsBuilt() const             { return Fonts.Size > 0 && (TexData.TexPixels != NULL); }
+    void                        SetTexID(ImTextureID id)    { TexData.TexID = id; }
+    ImTextureID                 GetTexID() const            { return TexData.TexID; }
 
     //-------------------------------------------
     // Glyph Ranges
@@ -2675,19 +2707,14 @@ struct ImFontAtlas
     //-------------------------------------------
 
     ImFontAtlasFlags            Flags;              // Build flags (see ImFontAtlasFlags_)
-    ImTextureID                 TexID;              // User data to refer to the texture once it has been uploaded to user's graphic systems. It is passed back to you during rendering via the ImDrawCmd structure.
     int                         TexDesiredWidth;    // Texture width desired by user before Build(). Must be a power-of-two. If have many glyphs your graphics API have texture size restrictions you may want to increase texture width to decrease height.
     int                         TexGlyphPadding;    // Padding between glyphs within texture in pixels. Defaults to 1. If your rendering method doesn't rely on bilinear filtering you may set this to 0.
     bool                        Locked;             // Marked as Locked by ImGui::NewFrame() so attempt to modify the atlas will assert.
 
     // [Internal]
     // NB: Access texture data via GetTexData*() calls! Which will setup a default font for you.
-    bool                        TexPixelsUseColors; // Tell whether our texture data is known to use colors (rather than just alpha channel), in order to help backend select a format.
-    unsigned char*              TexPixelsAlpha8;    // 1 component per pixel, each component is unsigned 8-bit. Total size = TexWidth * TexHeight
-    unsigned int*               TexPixelsRGBA32;    // 4 component per pixel, each component is unsigned 8-bit. Total size = TexWidth * TexHeight * 4
+    ImTextureData               TexData;
     bool                        TexDirty;           // Indicate that content of the atlas texture has changed and need to be uploaded again by backend
-    int                         TexWidth;           // Texture width calculated during Build().
-    int                         TexHeight;          // Texture height calculated during Build().
     ImVec2                      TexUvScale;         // = (1.0f/TexWidth, 1.0f/TexHeight)
     ImVec2                      TexUvWhitePixel;    // Texture coordinates to a white pixel
     ImVector<ImFont*>           Fonts;              // Hold all the fonts returned by AddFont*. Fonts[0] is the default font upon calling ImGui::NewFrame(), use ImGui::PushFont()/PopFont() to change the current font.
@@ -2802,9 +2829,23 @@ struct ImGuiViewport
 // [SECTION] Inline function implementations
 //-----------------------------------------------------------------------------
 
+inline ImTexture::ImTexture(ImFontAtlas* font_atlas)
+    : FontAtlas(font_atlas)
+    , Type(ImTextureType_Atlas)
+    , FontAtlasPage(font_atlas->TexPages.Size)
+{
+}
+
+inline ImTexture::ImTexture(ImTextureID texture_id)
+    : TextureId(texture_id)
+    , Type(ImTextureType_UserID)
+    , FontAtlasPage(0)
+{
+}
+
 inline ImTextureID ImTexture::GetID() const
 {
-    return Type == ImTextureType_Atlas ? FontAtlas->TexID : TextureId;
+    return Type == ImTextureType_Atlas ? FontAtlas->TexData.TexID : TextureId;
 }
 
 //-----------------------------------------------------------------------------
