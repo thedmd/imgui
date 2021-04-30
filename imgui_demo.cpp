@@ -7690,6 +7690,8 @@ void ShowExampleAppDocuments(bool* p_open)
     ImGui::End();
 }
 
+#include "imgui_internal.h"
+
 static const char* font_path_prefix = "../../misc/fonts/";
 static const char* fonts[] =
 {
@@ -7716,6 +7718,8 @@ void ImGui::UpdateFontDemo()
         if (selected_font_size < 0)
             selected_font_size = font_size;
 
+        io.Fonts->Locked = false; // #thedmd: remove this
+        io.Fonts->PushTexPage();
         io.Fonts->Clear();
         if (selected_font_index == 0)
         {
@@ -7735,7 +7739,9 @@ void ImGui::UpdateFontDemo()
         selected_font_index = -1;
         selected_font_size = -1.0f;
 
-        //io.Fonts->Build();
+        io.Fonts->Build();
+        io.Fonts->Locked = true; // #thedmd: remove this
+        ImGui::SetCurrentFont(ImGui::GetDefaultFont());
     }
 }
 
@@ -7774,9 +7780,11 @@ void ImGui::ShowFontDemoWindow()
         {
             ImVec4 tint_col = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
             ImVec4 border_col = ImVec4(1.0f, 1.0f, 1.0f, 0.5f);
-            ImGui::Image(atlas->GetTexID(), ImVec2((float)atlas->TexData.TexWidth, (float)atlas->TexData.TexHeight), ImVec2(0, 0), ImVec2(1, 1), tint_col, border_col);
+            ImGui::Image(ImTexture(atlas), ImVec2((float)atlas->TexData.TexWidth, (float)atlas->TexData.TexHeight), ImVec2(0, 0), ImVec2(1, 1), tint_col, border_col);
             //ImGui::TreePop();
         }
+
+        UpdateFontDemo();
 
         ImGui::End();
     }

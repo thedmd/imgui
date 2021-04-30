@@ -95,8 +95,6 @@ int main(int, char**)
         if (done)
             break;
 
-        ImGui::UpdateFontDemo();
-
         // Start the Dear ImGui frame
         ImGui_ImplDX9_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -151,6 +149,7 @@ int main(int, char**)
         if (g_pd3dDevice->BeginScene() >= 0)
         {
             ImGui::Render();
+            ImGui_ImplDX9_UpdateTextures();
             ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
             g_pd3dDevice->EndScene();
         }

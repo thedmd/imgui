@@ -147,6 +147,7 @@ struct ImGuiTextBuffer;             // Helper to hold and append into a text buf
 struct ImGuiTextFilter;             // Helper to parse and apply text filters (e.g. "aaaaa[,bbbbb][,ccccc]")
 struct ImGuiViewport;               // A Platform Window (always only one in 'master' branch), in the future may represent Platform Monitor
 struct ImTexture;
+struct ImTextureUpdateData;
 
 // Enums/Flags (declared as int for compatibility with old C++, to allow using as flags and to not pollute the top of this file)
 // - Tip: Use your programming IDE navigation facilities on the names in the _central column_ below to find the actual flags/enum lists!
@@ -274,6 +275,7 @@ namespace ImGui
     IMGUI_API void          EndFrame();                                 // ends the Dear ImGui frame. automatically called by Render(). If you don't need to render data (skipping rendering) you may call EndFrame() without Render()... but you'll have wasted CPU already! If you don't need to render, better to not create any windows and not call NewFrame() at all!
     IMGUI_API void          Render();                                   // ends the Dear ImGui frame, finalize the draw data. You can then get call GetDrawData().
     IMGUI_API ImDrawData*   GetDrawData();                              // valid after Render() and until the next call to NewFrame(). this is what you have to render.
+    IMGUI_API ImTextureUpdateData GetTextureUpdateData();
 
     // Demo, Debug, Information
     IMGUI_API void          ShowDemoWindow(bool* p_open = NULL);        // create Demo window. demonstrate most ImGui features. call this to learn about the library! try to make it always available in your application!
@@ -2623,6 +2625,7 @@ struct ImTextureData
 {
     IMGUI_API ImTextureData();
     IMGUI_API ~ImTextureData();
+    IMGUI_API void              Reset();
     IMGUI_API void              AllocatePixels(int width, int height, ImTextureFormat format, bool clear = true);
     IMGUI_API void              DiscardPixels();
     IMGUI_API void              EnsureFormat(ImTextureFormat format);
@@ -2635,6 +2638,11 @@ struct ImTextureData
     void*                       TexPixels;
     int                         TexWidth;
     int                         TexHeight;
+};
+
+struct ImTextureUpdateData
+{
+    ImVector<ImTextureData*>    Textures;
 };
 
 struct ImFontAtlas
@@ -2661,6 +2669,8 @@ struct ImFontAtlas
     IMGUI_API bool              IsDirty(); // Returns true if the font needs to be (re-)built. User code should call GetTexData*** and update either the whole texture or dirty region as required.
     IMGUI_API void              GetTexDataAsAlpha8(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel = NULL);  // 1 byte per-pixel
     IMGUI_API void              GetTexDataAsRGBA32(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel = NULL);  // 4 bytes-per-pixel
+    IMGUI_API void                BuildTextureUpdateData(ImTextureUpdateData* texture_update_data);
+    IMGUI_API ImTextureUpdateData GetTextureUpdateData();
     bool                        IsBuilt() const             { return Fonts.Size > 0 && (TexData.TexPixels != NULL); }
     void                        SetTexID(ImTextureID id)    { TexData.TexID = id; }
     ImTextureID                 GetTexID() const            { return TexData.TexID; }
@@ -2701,6 +2711,8 @@ struct ImFontAtlas
     IMGUI_API bool              GetMouseCursorTexData(ImGuiMouseCursor cursor, ImVec2* out_offset, ImVec2* out_size, ImVec2 out_uv_border[2], ImVec2 out_uv_fill[2]);
     IMGUI_API void              MarkDirty(); // Mark atlas texture as dirty
     IMGUI_API void              MarkClean(); // Mark the whole texture as clean. Should be called after uploading texture.
+    IMGUI_API void              PushTexPage();
+    IMGUI_API void              ClearTransientTextures();
 
     //-------------------------------------------
     // Members
@@ -2721,6 +2733,7 @@ struct ImFontAtlas
     ImVector<ImFontAtlasCustomRect> CustomRects;    // Rectangles for packing custom texture data into the atlas.
     ImVector<ImFontConfig>      ConfigData;         // Configuration data
     ImVec4                      TexUvLines[IM_DRAWLIST_TEX_LINES_WIDTH_MAX + 1];  // UVs for baked anti-aliased lines
+    ImVector<ImTextureData>     TexPages;
 
     // [Internal] Font builder
     const ImFontBuilderIO*      FontBuilderIO;      // Opaque interface to a font builder (default to stb_truetype, can be changed to use FreeType by defining IMGUI_ENABLE_FREETYPE).
@@ -2845,7 +2858,15 @@ inline ImTexture::ImTexture(ImTextureID texture_id)
 
 inline ImTextureID ImTexture::GetID() const
 {
-    return Type == ImTextureType_Atlas ? FontAtlas->TexData.TexID : TextureId;
+    if (Type == ImTextureType_Atlas)
+    {
+        if (FontAtlasPage < FontAtlas->TexPages.Size)
+            return FontAtlas->TexPages[FontAtlasPage].GetTexID();
+        else
+            return FontAtlas->TexData.GetTexID();
+    }
+    else
+        return TextureId;
 }
 
 //-----------------------------------------------------------------------------
