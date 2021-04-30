@@ -259,9 +259,8 @@ void ImGui_ImplDX9_Shutdown()
     if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = NULL; }
 }
 
-static LPDIRECT3DTEXTURE9 ImGui_ImplDX9_UpdateTexture(const ImTextureData& texture_data)
+static LPDIRECT3DTEXTURE9 ImGui_ImplDX9_UpdateTexture(LPDIRECT3DTEXTURE9 texture, const ImTextureData& texture_data)
 {
-    LPDIRECT3DTEXTURE9 texture         = (LPDIRECT3DTEXTURE9)texture_data.GetTexID();
     unsigned char*     pixels          = (unsigned char*)texture_data.TexPixels;
     int                width           = texture_data.TexWidth;
     int                height          = texture_data.TexHeight;
@@ -392,11 +391,11 @@ static void ImGui_ImplDX9_UpdateTextures(ImVector<LPDIRECT3DTEXTURE9>& textures,
         ImTextureData* texture_data = textures_data[i];
 
         LPDIRECT3DTEXTURE9 current_texture = (LPDIRECT3DTEXTURE9)texture_data->GetTexID();
-        if (current_texture == NULL || recreate_all)
+        if (current_texture == NULL || recreate_all || texture_data->IsDirty())
         {
             texture_data->EnsureFormat(ImTextureFormat_RGBA32);
 
-            LPDIRECT3DTEXTURE9 new_texture = ImGui_ImplDX9_UpdateTexture(*texture_data);
+            LPDIRECT3DTEXTURE9 new_texture = ImGui_ImplDX9_UpdateTexture(current_texture, *texture_data);
             if (current_texture != NULL && new_texture != current_texture)
                 textures.find_erase_unsorted(current_texture);
 
@@ -406,6 +405,7 @@ static void ImGui_ImplDX9_UpdateTextures(ImVector<LPDIRECT3DTEXTURE9>& textures,
             discarded.find_erase_unsorted(new_texture);
 
             texture_data->SetTexID(new_texture);
+            texture_data->MarkClean();
         }
         else if (current_texture)
             discarded.find_erase_unsorted(current_texture);

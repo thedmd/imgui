@@ -2633,11 +2633,16 @@ struct ImTextureData
     void                        SetTexID(ImTextureID tex_id) { TexID = tex_id; }
     ImTextureID                 GetTexID() const { return TexID; }
 
+    void                        MarkDirty() { TexDirty = true; }
+    void                        MarkClean() { TexDirty = false; }
+    bool                        IsDirty() const { return TexDirty; }
+
     ImTextureID                 TexID;
     ImTextureFormat             TexFormat;
     void*                       TexPixels;
     int                         TexWidth;
     int                         TexHeight;
+    bool                        TexDirty;
 };
 
 struct ImTextureUpdateData

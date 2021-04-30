@@ -2982,6 +2982,8 @@ void ImFontAtlasBuildFinish(ImFontAtlas* atlas)
                 break;
             }
     }
+
+    atlas->TexData.MarkDirty();
 }
 
 // Retrieve list of range (2 int per range, values are inclusive)
