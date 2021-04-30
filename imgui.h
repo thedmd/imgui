@@ -287,7 +287,6 @@ namespace ImGui
     IMGUI_API void          ShowUserGuide();                            // add basic help/info block (not a window): how to manipulate ImGui as a end-user (mouse/keyboard controls).
     IMGUI_API const char*   GetVersion();                               // get the compiled version string e.g. "1.80 WIP" (essentially the value for IMGUI_VERSION from the compiled version of imgui.cpp)
 
-    IMGUI_API void          UpdateFontDemo();
     IMGUI_API void          ShowFontDemoWindow();
 
     // Styles

@@ -7702,14 +7702,25 @@ static const char* fonts[] =
     "ProggyTiny.ttf",
 };
 
-static int selected_font_index = -1;
-static float selected_font_size = -1.0f;
-static int font_index = 0;
-static float font_size = 16.0f;
-
-void ImGui::UpdateFontDemo()
+struct FontDemoState
 {
-    if (selected_font_index >= 0 || selected_font_size > 0.0f)
+    int     selected_font_index = -1;
+    float   selected_font_size = -1.0f;
+    int     font_index = 0;
+    float   font_size = 16.0f;
+};
+
+static FontDemoState font_demo_state;
+static FontDemoState font_demo_state2;
+
+static void UpdateFontDemo(FontDemoState& state)
+{
+    int&    selected_font_index = state.selected_font_index;
+    float&  selected_font_size  = state.selected_font_size;
+    int&    font_index          = state.font_index;
+    float&  font_size           = state.font_size;
+
+    //if (selected_font_index >= 0 || selected_font_size > 0.0f)
     {
         ImGuiIO& io = ImGui::GetIO();
 
@@ -7742,6 +7753,53 @@ void ImGui::UpdateFontDemo()
         io.Fonts->Build();
         io.Fonts->Locked = true; // #thedmd: remove this
         ImGui::SetCurrentFont(ImGui::GetDefaultFont());
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        draw_list->_CmdHeader.Texture = ImTexture(io.Fonts);
+        draw_list->_OnChangedTextureID();
+
+        draw_list = ImGui::GetOverlayDrawList();
+        draw_list->_CmdHeader.Texture = ImTexture(io.Fonts);
+        draw_list->_OnChangedTextureID();
+
+        draw_list = ImGui::GetBackgroundDrawList();
+        draw_list->_CmdHeader.Texture = ImTexture(io.Fonts);
+        draw_list->_OnChangedTextureID();
+    }
+}
+
+static void ShowFontDemo(FontDemoState& state)
+{
+    int&    selected_font_index = state.selected_font_index;
+    float&  selected_font_size  = state.selected_font_size;
+    int&    font_index          = state.font_index;
+    float&  font_size           = state.font_size;
+
+    UpdateFontDemo(state);
+
+    if (ImGui::BeginCombo("Font", fonts[font_index]))
+    {
+        for (int i = 0; i < IM_ARRAYSIZE(fonts); ++i)
+        {
+            if (ImGui::Selectable(fonts[i]))
+                selected_font_index = i;
+        }
+
+        ImGui::EndCombo();
+    }
+
+    float size = font_size;
+    if (ImGui::SliderFloat("Size", &size, 6.0f, 48.0f))
+        selected_font_size = size;
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImFontAtlas* atlas = io.Fonts;
+    //if (ImGui::TreeNode("Atlas texture", "Atlas texture (%dx%d pixels)", atlas->TexWidth, atlas->TexHeight))
+    ImGui::Text("Atlas texture (%dx%d pixels)", atlas->TexData.TexWidth, atlas->TexData.TexHeight);
+    {
+        ImVec4 tint_col = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+        ImVec4 border_col = ImVec4(1.0f, 1.0f, 1.0f, 0.5f);
+        ImGui::Image(ImTexture(atlas), ImVec2((float)atlas->TexData.TexWidth, (float)atlas->TexData.TexHeight), ImVec2(0, 0), ImVec2(1, 1), tint_col, border_col);
+        //ImGui::TreePop();
     }
 }
 
@@ -7758,33 +7816,13 @@ void ImGui::ShowFontDemoWindow()
         if (io.BackendRendererName)
             ImGui::TextUnformatted(io.BackendRendererName);
 
-        if (ImGui::BeginCombo("Font", fonts[font_index]))
-        {
-            for (int i = 0; i < IM_ARRAYSIZE(fonts); ++i)
-            {
-                if (ImGui::Selectable(fonts[i]))
-                    selected_font_index = i;
-            }
+        ImGui::PushID(0);
+        ShowFontDemo(font_demo_state);
+        ImGui::PopID();
 
-            ImGui::EndCombo();
-        }
-
-        float size = font_size;
-        if (ImGui::SliderFloat("Size", &size, 6.0f, 48.0f))
-            selected_font_size = size;
-
-        //ImGuiIO& io = ImGui::GetIO();
-        ImFontAtlas* atlas = io.Fonts;
-        //if (ImGui::TreeNode("Atlas texture", "Atlas texture (%dx%d pixels)", atlas->TexWidth, atlas->TexHeight))
-        ImGui::Text("Atlas texture (%dx%d pixels)", atlas->TexData.TexWidth, atlas->TexData.TexHeight);
-        {
-            ImVec4 tint_col = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-            ImVec4 border_col = ImVec4(1.0f, 1.0f, 1.0f, 0.5f);
-            ImGui::Image(ImTexture(atlas), ImVec2((float)atlas->TexData.TexWidth, (float)atlas->TexData.TexHeight), ImVec2(0, 0), ImVec2(1, 1), tint_col, border_col);
-            //ImGui::TreePop();
-        }
-
-        UpdateFontDemo();
+        ImGui::PushID(1);
+        ShowFontDemo(font_demo_state2);
+        ImGui::PopID();
 
         ImGui::End();
     }
