@@ -6398,6 +6398,21 @@ ImVec2 ImGui::CalcTextSize(const char* text, const char* text_end, bool hide_tex
     return text_size;
 }
 
+// Window hit test (SetNextWindowHitTest()), once 'pos' is within the window rectangle expanded by 'padding'.
+static bool WindowHitTest(ImGuiWindow* window, const ImVec2& pos, const ImVec2& padding)
+{
+    ImGuiContext& g = *GImGui;
+    ImGuiHitTestCallbackData data;
+    data.Ctx = &g;
+    data.UserData = window->WindowHitTest.UserData;
+    data.ID = window->ID;
+    data.MousePos = pos;
+    data.RectMin = window->Pos;
+    data.RectMax = window->Pos + window->Size;
+    data.Padding = padding;
+    return window->WindowHitTest.Callback(&data);
+}
+
 // Find window given position, search front-to-back
 // - Typically write output back to g.HoveredWindow and g.HoveredWindowUnderMovingWindow.
 // - FIXME: Note that we have an inconsequential lag here: OuterRectClipped is updated in Begin(), so windows moved programmatically
@@ -6438,6 +6453,9 @@ void ImGui::FindHoveredWindowEx(const ImVec2& pos, bool find_first_and_in_any_vi
             if (ImRect(hole_pos, hole_pos + hole_size).Contains(pos))
                 continue;
         }
+
+        if (window->WindowHitTest.Callback != NULL && !WindowHitTest(window, pos, hit_padding))
+            continue;
 
         if (find_first_and_in_any_viewport)
         {
@@ -7792,6 +7810,10 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
         SetWindowCollapsed(window, g.NextWindowData.CollapsedVal, g.NextWindowData.CollapsedCond);
     if (g.NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasFocus)
         FocusWindow(window);
+    if (g.NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasHitTest)
+        SetWindowHitTest(window, g.NextWindowData.WindowHitTestVal.Callback, g.NextWindowData.WindowHitTestVal.UserData);
+    else if (first_begin_of_the_frame)
+        SetWindowHitTest(window, NULL, NULL);
     if (window->Appearing)
         SetWindowConditionAllowFlags(window, ImGuiCond_Appearing, false);
 
@@ -8856,6 +8878,12 @@ void ImGui::SetWindowHitTestHole(ImGuiWindow* window, const ImVec2& pos, const I
     window->HitTestHoleOffset = ImVec2ih(pos - window->Pos);
 }
 
+// Lasts until the next Begin() of the window, which applies SetNextWindowHitTest() or clears it.
+void ImGui::SetWindowHitTest(ImGuiWindow* window, ImGuiHitTestCallback callback, void* user_data)
+{
+    window->WindowHitTest = ImGuiHitTestData(callback, user_data);
+}
+
 void ImGui::SetWindowHiddenAndSkipItemsForCurrentFrame(ImGuiWindow* window)
 {
     window->Hidden = window->SkipItems = true;
@@ -8883,6 +8911,12 @@ void ImGui::SetWindowCollapsed(const char* name, bool collapsed, ImGuiCond cond)
 {
     if (ImGuiWindow* window = FindWindowByName(name))
         SetWindowCollapsed(window, collapsed, cond);
+}
+
+void ImGui::SetWindowHitTest(const char* name, ImGuiHitTestCallback callback, void* user_data)
+{
+    if (ImGuiWindow* window = FindWindowByName(name))
+        SetWindowHitTest(window, callback, user_data);
 }
 
 void ImGui::SetNextWindowPos(const ImVec2& pos, ImGuiCond cond, const ImVec2& pivot)
@@ -8947,6 +8981,13 @@ void ImGui::SetNextWindowBgAlpha(float alpha)
     ImGuiContext& g = *GImGui;
     g.NextWindowData.HasFlags |= ImGuiNextWindowDataFlags_HasBgAlpha;
     g.NextWindowData.BgAlphaVal = alpha;
+}
+
+void ImGui::SetNextWindowHitTest(ImGuiHitTestCallback callback, void* user_data)
+{
+    ImGuiContext& g = *GImGui;
+    g.NextWindowData.HasFlags |= ImGuiNextWindowDataFlags_HasHitTest;
+    g.NextWindowData.WindowHitTestVal = ImGuiHitTestData(callback, user_data);
 }
 
 // This is experimental and meant to be a toy for exploring a future/wider range of features.
