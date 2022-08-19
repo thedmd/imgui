@@ -6653,6 +6653,23 @@ ImVec2 ImGui::CalcTextSize(const char* text, const char* text_end, bool hide_tex
     return text_size;
 }
 
+// Window hit test (SetNextWindowHitTest()), once 'pos' is within the window rectangle expanded by 'padding'.
+static bool WindowHitTest(ImGuiWindow* window, const ImVec2& pos, const ImVec2& padding)
+{
+    ImGuiContext& g = *GImGui;
+    ImGuiHitTestCallbackData data;
+    data.Ctx = &g;
+    data.UserData = window->WindowHitTest.UserData;
+    data.ID = window->ID;
+    data.MousePos = pos;
+    data.RectMin = window->Pos;
+    data.RectMax = window->Pos + window->Size;
+    if (window->DockIsActive)
+        data.RectMin.y += window->TitleBarHeight; // The dock node tab bar, as OuterRectClipped
+    data.Padding = padding;
+    return window->WindowHitTest.Callback(&data);
+}
+
 // Find window given position, search front-to-back
 // - Typically write output back to g.HoveredWindow and g.HoveredWindowUnderMovingWindow.
 // - FIXME: Note that we have an inconsequential lag here: OuterRectClipped is updated in Begin(), so windows moved programmatically
@@ -6677,6 +6694,7 @@ void ImGui::FindHoveredWindowEx(const ImVec2& pos, bool find_first_and_in_any_vi
 
     ImVec2 padding_regular = g.Style.TouchExtraPadding;
     ImVec2 padding_for_resize = ImMax(g.Style.TouchExtraPadding, ImVec2(g.Style.WindowBorderHoverPadding, g.Style.WindowBorderHoverPadding));
+    ImGuiWindow* hit_test_rejected_docked_window = NULL;
     for (int i = g.Windows.Size - 1; i >= 0; i--)
     {
         ImGuiWindow* window = g.Windows[i];
@@ -6702,6 +6720,17 @@ void ImGui::FindHoveredWindowEx(const ImVec2& pos, bool find_first_and_in_any_vi
             ImVec2 hole_size((float)window->HitTestHoleSize.x, (float)window->HitTestHoleSize.y);
             if (ImRect(hole_pos, hole_pos + hole_size).Contains(pos))
                 continue;
+        }
+
+        // A docked window covers its dock node: positions its hit test rejects go through the windows hosting the node too.
+        // Children follow their parent in g.Windows (sorted in EndFrame()), so the hosts come after the docked window here.
+        if (hit_test_rejected_docked_window != NULL && IsWindowChildOf(hit_test_rejected_docked_window, window, false, true))
+            continue;
+        if (window->WindowHitTest.Callback != NULL && !WindowHitTest(window, pos, hit_padding))
+        {
+            if (window->DockIsActive)
+                hit_test_rejected_docked_window = window;
+            continue;
         }
 
         if (find_first_and_in_any_viewport)
@@ -8225,6 +8254,10 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
         SetWindowCollapsed(window, g.NextWindowData.CollapsedVal, g.NextWindowData.CollapsedCond);
     if (g.NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasFocus)
         FocusWindow(window);
+    if (g.NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasHitTest)
+        SetWindowHitTest(window, g.NextWindowData.WindowHitTestVal.Callback, g.NextWindowData.WindowHitTestVal.UserData);
+    else if (first_begin_of_the_frame)
+        SetWindowHitTest(window, NULL, NULL);
     if (window->Appearing)
         SetWindowConditionAllowFlags(window, ImGuiCond_Appearing, false);
 
@@ -9439,6 +9472,12 @@ void ImGui::SetWindowHitTestHole(ImGuiWindow* window, const ImVec2& pos, const I
     window->HitTestHoleOffset = ImVec2ih(pos - window->Pos);
 }
 
+// Lasts until the next Begin() of the window, which applies SetNextWindowHitTest() or clears it.
+void ImGui::SetWindowHitTest(ImGuiWindow* window, ImGuiHitTestCallback callback, void* user_data)
+{
+    window->WindowHitTest = ImGuiHitTestData(callback, user_data);
+}
+
 void ImGui::SetWindowHiddenAndSkipItemsForCurrentFrame(ImGuiWindow* window)
 {
     window->Hidden = window->SkipItems = true;
@@ -9466,6 +9505,12 @@ void ImGui::SetWindowCollapsed(const char* name, bool collapsed, ImGuiCond cond)
 {
     if (ImGuiWindow* window = FindWindowByName(name))
         SetWindowCollapsed(window, collapsed, cond);
+}
+
+void ImGui::SetWindowHitTest(const char* name, ImGuiHitTestCallback callback, void* user_data)
+{
+    if (ImGuiWindow* window = FindWindowByName(name))
+        SetWindowHitTest(window, callback, user_data);
 }
 
 void ImGui::SetNextWindowPos(const ImVec2& pos, ImGuiCond cond, const ImVec2& pivot)
@@ -9554,6 +9599,13 @@ void ImGui::SetNextWindowClass(const ImGuiWindowClass* window_class)
     IM_ASSERT((window_class->ViewportFlagsOverrideSet & window_class->ViewportFlagsOverrideClear) == 0); // Cannot set both set and clear for the same bit
     g.NextWindowData.HasFlags |= ImGuiNextWindowDataFlags_HasWindowClass;
     g.NextWindowData.WindowClass = *window_class;
+}
+
+void ImGui::SetNextWindowHitTest(ImGuiHitTestCallback callback, void* user_data)
+{
+    ImGuiContext& g = *GImGui;
+    g.NextWindowData.HasFlags |= ImGuiNextWindowDataFlags_HasHitTest;
+    g.NextWindowData.WindowHitTestVal = ImGuiHitTestData(callback, user_data);
 }
 
 // This is experimental and meant to be a toy for exploring a future/wider range of features.
