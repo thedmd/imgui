@@ -294,6 +294,7 @@ static ImGuiLayoutState* CreateLayoutState(ImGuiID context_id, ImGuiContext* con
 
 static void StackLayout_NewFramePreCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
 {
+    (void)ctx;
     ImGuiLayoutState* layout_state = (ImGuiLayoutState*)hook->UserData;
 
     for (int i = 0; i < layout_state->LayoutWindowStates.Data.Size; ++i)
@@ -306,6 +307,7 @@ static void StackLayout_NewFramePreCallback(ImGuiContext* ctx, ImGuiContextHook*
 
 static void StackLayout_EndFramePreCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
 {
+    (void)ctx;
     ImGuiLayoutState* layout_state = (ImGuiLayoutState*)hook->UserData;
 
     for (int i = 0; i < layout_state->LayoutWindowStates.Data.Size; ++i)
@@ -318,6 +320,7 @@ static void StackLayout_EndFramePreCallback(ImGuiContext* ctx, ImGuiContextHook*
 
 static void StackLayout_ShutdownCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
 {
+    (void)ctx;
     ImGuiLayoutState* layout_state = (ImGuiLayoutState*)hook->UserData;
 
     for (int i = 0; i < layout_state->LayoutWindowStates.Data.Size; ++i)
@@ -381,6 +384,7 @@ static void WindowLayoutState_OnNewFrame(ImGuiLayoutWindowState* state)
 
 static void WindowLayoutState_OnEndFrame(ImGuiLayoutWindowState* state)
 {
+    (void)state;
     // Check stacks (like ImGuiStackSizes::CompareWithCurrentState() does)
     IM_ASSERT(0 == state->LayoutStack.Size && (!state->LayoutStack.Size || state->LayoutStack.back()->Type == ImGuiLayoutType_Horizontal) && "BeginHorizontal/EndHorizontal Mismatch!");
     IM_ASSERT(0 == state->LayoutStack.Size && (!state->LayoutStack.Size || state->LayoutStack.back()->Type == ImGuiLayoutType_Vertical)   && "BeginVertical/EndVertical Mismatch!");
@@ -824,7 +828,6 @@ static void ImGui::BalanceChildLayouts(ImGuiLayout& layout)
 
 static ImGuiLayoutItem* ImGui::GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemType type)
 {
-    ImGuiContext& g = *GImGui;
     IM_ASSERT(layout.CurrentItemIndex <= layout.Items.Size);
 
     if (layout.CurrentItemIndex < layout.Items.Size)
