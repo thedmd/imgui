@@ -539,7 +539,8 @@ static void ImGui::EndLayout(ImGuiLayoutType type)
     layout->CurrentSize = new_size;
 
     ImVec2 measured_size = new_size;
-    if ((auto_width || auto_height) && layout->Parent)
+    // Inflate to parent size only when there are springs that need the free space.
+    if ((auto_width || auto_height) && layout->Parent && HasAnyNonZeroSpring(*layout))
     {
         if (layout->Type == ImGuiLayoutType_Horizontal && auto_width && layout->Parent->CurrentSize.x > 0)
             layout->CurrentSize.x = layout->Parent->CurrentSize.x;
