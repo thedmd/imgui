@@ -229,7 +229,6 @@ static void             BalanceChildLayouts(ImGuiLayout& layout);
 static void             BeginLayoutClipRect(ImGuiLayout& layout);
 static void             EndLayoutClipRect(ImGuiLayout& layout);
 static void             ApplyLayoutClipRect(ImGuiLayout& layout);
-static void             MergeLayoutSplitters(ImGuiLayout& layout);
 static ImGuiLayoutItem* GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemType type);
 static float            CalculateLayoutItemAlignmentOffset(ImGuiLayout& layout, ImGuiLayoutItem& item);
 static void             TranslateLayoutItem(ImGuiLayoutItem& item, const ImVec2& offset);
@@ -863,19 +862,15 @@ static void ImGui::EndLayoutClipRect(ImGuiLayout& layout)
 {
     PopClipRect();
 
-    if (layout.Parent != NULL)
-        return;
-
+    // Layout bounds are final at this point: clamp recorded commands
+    // and merge them right away.
     ApplyLayoutClipRect(layout);
 
-    MergeLayoutSplitters(layout);
+    layout.Splitter.Merge(GetCurrentWindow()->DrawList);
 }
 
 static void ImGui::ApplyLayoutClipRect(ImGuiLayout& layout)
 {
-    for (ImGuiLayout* child = layout.FirstChild; child != NULL; child = child->NextSibling)
-        ApplyLayoutClipRect(*child);
-
     ImGuiWindow* window = GetCurrentWindow();
 
     ImVec4 current_clip_rect;
@@ -895,16 +890,6 @@ static void ImGui::ApplyLayoutClipRect(ImGuiLayout& layout)
     }
 
     //GetForegroundDrawList()->AddRect(layout.StartPos, layout.StartPos + layout.MeasuredSize, IM_COL32(255,0,0,128)); // [DEBUG]
-}
-
-static void ImGui::MergeLayoutSplitters(ImGuiLayout& layout)
-{
-    for (ImGuiLayout* child = layout.FirstChild; child != NULL; child = child->NextSibling)
-        MergeLayoutSplitters(*child);
-
-    ImGuiWindow* window = GetCurrentWindow();
-
-    layout.Splitter.Merge(window->DrawList);
 }
 
 static ImGuiLayoutItem* ImGui::GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemType type)
