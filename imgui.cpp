@@ -11734,15 +11734,17 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
     if (layout_type == ImGuiLayoutType_Horizontal)
     {
         const float line_width = ImMax(window->DC.CurrLineSize.x, size.x);
+        const float line_y1 = window->DC.CursorPos.y;
+        const float line_y2 = line_y1 + size.y;
 
         // Always align ourselves on pixel boundaries
         //if (g.IO.KeyAlt) window->DrawList->AddRect(window->DC.CursorPos, window->DC.CursorPos + ImVec2(size.x, line_height), IM_COL32(255,0,0,200)); // [DEBUG]
         window->DC.CursorPosPrevLine.x = window->DC.CursorPos.x;
-        window->DC.CursorPosPrevLine.y = window->DC.CursorPos.y + size.y;
+        window->DC.CursorPosPrevLine.y = line_y1;
         window->DC.CursorPos.x = IM_TRUNC(window->DC.CursorPos.x + line_width + g.Style.ItemSpacing.x);
-        window->DC.CursorPos.y = IM_TRUNC(window->DC.CursorPosPrevLine.y - size.y);
+        window->DC.CursorPos.y = line_y1;
         window->DC.CursorMaxPos.x = ImMax(window->DC.CursorMaxPos.x, window->DC.CursorPos.x - g.Style.ItemSpacing.x);
-        window->DC.CursorMaxPos.y = ImMax(window->DC.CursorMaxPos.y, window->DC.CursorPosPrevLine.y);
+        window->DC.CursorMaxPos.y = ImMax(window->DC.CursorMaxPos.y, line_y2);
         //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorMaxPos, 3.0f, IM_COL32(255,0,0,255), 4); // [DEBUG]
 
         window->DC.PrevLineSize.x = line_width;
