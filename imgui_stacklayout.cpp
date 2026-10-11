@@ -1112,9 +1112,14 @@ void ImGuiInternal::LayoutErrorRecoveryTryToRecoverWindowState(ImGuiID window_id
 {
     ImGuiLayoutWindowState* state = GetWindowLayoutState(window_id);
 
-    while (state->CurrentLayout != NULL) //-V1044
+    while (state->LayoutStack.Size > 0) //-V1044
     {
-        if (state->CurrentLayout->Type == ImGuiLayoutType_Horizontal)
+        if (state->CurrentLayout == NULL)
+        {
+            IM_ASSERT_USER_ERROR(0, "Missing ResumeLayout()");
+            ImGui::ResumeLayout();
+        }
+        else if (state->CurrentLayout->Type == ImGuiLayoutType_Horizontal)
         {
             IM_ASSERT_USER_ERROR(0, "Missing EndHorizontal()");
             ImGui::EndHorizontal();
