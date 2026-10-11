@@ -11723,15 +11723,15 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
         return;
 
 #ifdef IMGUI_HAS_STACK_LAYOUT
-    ImGuiLayoutType layout_type = ImGuiInternal::GetCurrentLayoutType(window->ID);
+    const ImGuiLayoutType stack_layout_type = ImGuiInternal::GetCurrentLayoutType(window->ID);
 #else
-    ImGuiLayoutType layout_type = window->DC.LayoutType;
+    const ImGuiLayoutType stack_layout_type = -1;
 #endif
 
     //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorPos, 3.0f, IM_COL32(255,255,0,255), 4); // [DEBUG] Widget position
 
     // Stack Layouts: Handle horizontal case first to simplify merge in case code handling vertical changes.
-    if (layout_type == ImGuiLayoutType_Horizontal)
+    if (stack_layout_type == ImGuiLayoutType_Horizontal)
     {
         const float line_width = ImMax(window->DC.CurrLineSize.x, size.x);
         const float line_y1 = window->DC.CursorPos.y;
@@ -11780,6 +11780,10 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
     window->DC.PrevLineTextBaseOffset = ImMax(window->DC.CurrLineTextBaseOffset, text_baseline_y);
     window->DC.CurrLineTextBaseOffset = 0.0f;
     window->DC.IsSameLine = window->DC.IsSetPos = false;
+
+    // Horizontal layout mode
+    if (stack_layout_type == -1 && window->DC.LayoutType == ImGuiLayoutType_Horizontal)
+        SameLine();
 }
 IM_MSVC_RUNTIME_CHECKS_RESTORE
 

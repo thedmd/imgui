@@ -1091,15 +1091,11 @@ static void ImGui::AddLayoutSpring(ImGuiLayout& layout, float weight, float spac
 // [SECTION] Stack Layout: Internal API
 //-----------------------------------------------------------------------------
 
+// Type of the stack layout receiving items, -1 outside of stack layouts (or while suspended).
 ImGuiLayoutType ImGuiInternal::GetCurrentLayoutType(ImGuiID window_id)
 {
     ImGuiLayoutWindowState* state = GetWindowLayoutState(window_id);
-
-    ImGuiLayoutType layout_type = state->Window->DC.LayoutType;
-    if (state->CurrentLayout)
-        layout_type = state->CurrentLayout->Type;
-
-    return layout_type;
+    return state->CurrentLayout ? state->CurrentLayout->Type : -1;
 }
 
 void ImGuiInternal::UpdateItemRect(ImGuiID window_id, const ImVec2& min, const ImVec2& max)
