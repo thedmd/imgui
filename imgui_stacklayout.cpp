@@ -56,12 +56,6 @@ Index of this file:
 #ifndef IMGUI_DISABLE
 #include "imgui_internal.h"
 
-#if defined(_MSC_VER) && _MSC_VER <= 1500 // MSVC 2008 or earlier
-#include <stddef.h>     // intptr_t
-#else
-#include <stdint.h>     // intptr_t
-#endif
-
 //-----------------------------------------------------------------------------
 // [SECTION] Stack layout: Forward declarations
 //-----------------------------------------------------------------------------
@@ -446,7 +440,7 @@ static void ImGui::BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, fl
 {
     ImGuiWindow* window = GetCurrentWindow();
 
-    PushID(id);
+    PushOverrideID(id);
 
     // Find or create
     ImGuiLayout* layout = FindLayout(id, type);
@@ -1152,7 +1146,7 @@ void ImGui::BeginHorizontal(const void* ptr_id, const ImVec2& size/* = ImVec2(0,
 void ImGui::BeginHorizontal(int id, const ImVec2& size/* = ImVec2(0, 0)*/, float align/* = -1*/)
 {
     ImGuiWindow* window = GetCurrentWindow();
-    BeginLayout(window->GetID((void*)(intptr_t)id), ImGuiLayoutType_Horizontal, size, align);
+    BeginLayout(window->GetID(id), ImGuiLayoutType_Horizontal, size, align);
 }
 
 void ImGui::EndHorizontal()
@@ -1175,7 +1169,7 @@ void ImGui::BeginVertical(const void* ptr_id, const ImVec2& size/* = ImVec2(0, 0
 void ImGui::BeginVertical(int id, const ImVec2& size/* = ImVec2(0, 0)*/, float align/* = -1*/)
 {
     ImGuiWindow* window = GetCurrentWindow();
-    BeginLayout(window->GetID((void*)(intptr_t)id), ImGuiLayoutType_Vertical, size, align);
+    BeginLayout(window->GetID(id), ImGuiLayoutType_Vertical, size, align);
 }
 
 void ImGui::EndVertical()
