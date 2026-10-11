@@ -93,8 +93,8 @@ struct ImGuiLayoutItem
     float                   CurrentAlign;
     float                   CurrentAlignOffset;
 
-    unsigned int            VertexIndexBegin;
-    unsigned int            VertexIndexEnd;
+    int                     VertexIndexBegin;
+    int                     VertexIndexEnd;
 
     ImGuiLayoutItem(ImGuiLayoutItemType type)
     {
@@ -105,7 +105,7 @@ struct ImGuiLayoutItem
         SpringSize = 0.0f;
         CurrentAlign = 0.0f;
         CurrentAlignOffset = 0.0f;
-        VertexIndexBegin = VertexIndexEnd = (ImDrawIdx)0;
+        VertexIndexBegin = VertexIndexEnd = 0;
     }
 };
 
@@ -993,7 +993,7 @@ static void ImGui::BeginLayoutItem(ImGuiLayout& layout)
     }
 
     item.MeasuredBounds.Min = item.MeasuredBounds.Max = window->DC.CursorPos;
-    item.VertexIndexBegin = item.VertexIndexEnd = window->DrawList->_VtxCurrentIdx;
+    item.VertexIndexBegin = item.VertexIndexEnd = window->DrawList->VtxBuffer.Size;
 }
 
 static void ImGui::EndLayoutItem(ImGuiLayout& layout)
@@ -1005,7 +1005,7 @@ static void ImGui::EndLayoutItem(ImGuiLayout& layout)
     ImGuiLayoutItem& item = layout.Items[layout.CurrentItemIndex];
 
     ImDrawList* draw_list = window->DrawList;
-    item.VertexIndexEnd = draw_list->_VtxCurrentIdx;
+    item.VertexIndexEnd = draw_list->VtxBuffer.Size;
 
     if (item.CurrentAlign > 0.0f && layout.Type == ImGuiLayoutType_Vertical)
         SignedIndent(-item.CurrentAlignOffset);
