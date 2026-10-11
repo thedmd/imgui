@@ -171,7 +171,7 @@ struct ImGuiLayoutState
     ImGuiContext*   Context;
     ImGuiID         ContextID;
     ImGuiID         NewFramePreID;
-    ImGuiID         EndFramePreID;
+    ImGuiID         EndFramePostID;
     ImGuiID         ShutdownHookID;
 
     ImGuiLayoutState()
@@ -179,7 +179,7 @@ struct ImGuiLayoutState
         Context        = NULL;
         ContextID      = 0;
         NewFramePreID  = 0;
-        EndFramePreID  = 0;
+        EndFramePostID = 0;
         ShutdownHookID = 0;
     }
 };
@@ -197,7 +197,7 @@ static ImGuiLayoutState*        GetCurrentLayoutState();
 static ImGuiLayoutState*        GetLayoutState(ImGuiContext* context);
 static ImGuiLayoutState*        CreateLayoutState(ImGuiID context_id, ImGuiContext* context);
 static void                     StackLayout_NewFramePreCallback(ImGuiContext* ctx, ImGuiContextHook* hook);
-static void                     StackLayout_EndFramePreCallback(ImGuiContext* ctx, ImGuiContextHook* hook);
+static void                     StackLayout_EndFramePostCallback(ImGuiContext* ctx, ImGuiContextHook* hook);
 static void                     StackLayout_ShutdownCallback(ImGuiContext* ctx, ImGuiContextHook* hook);
 
 static ImGuiLayoutWindowState*  GetWindowLayoutState(ImGuiID window_id, ImGuiWindow* window = NULL);
@@ -280,11 +280,11 @@ static ImGuiLayoutState* CreateLayoutState(ImGuiID context_id, ImGuiContext* con
     new_frame_pre_hook.Callback = StackLayout_NewFramePreCallback;
     state->NewFramePreID = ImGui::AddContextHook(context, &new_frame_pre_hook);
 
-    ImGuiContextHook end_frame_pre_hook;
-    end_frame_pre_hook.Type     = ImGuiContextHookType_EndFramePre;
-    end_frame_pre_hook.UserData = state;
-    end_frame_pre_hook.Callback = StackLayout_EndFramePreCallback;
-    state->EndFramePreID = ImGui::AddContextHook(context, &end_frame_pre_hook);
+    ImGuiContextHook end_frame_post_hook;
+    end_frame_post_hook.Type     = ImGuiContextHookType_EndFramePost;
+    end_frame_post_hook.UserData = state;
+    end_frame_post_hook.Callback = StackLayout_EndFramePostCallback;
+    state->EndFramePostID = ImGui::AddContextHook(context, &end_frame_post_hook);
 
     ImGuiContextHook shutdown_hook;
     shutdown_hook.Type     = ImGuiContextHookType_Shutdown;
@@ -310,7 +310,7 @@ static void StackLayout_NewFramePreCallback(ImGuiContext* ctx, ImGuiContextHook*
     }
 }
 
-static void StackLayout_EndFramePreCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
+static void StackLayout_EndFramePostCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
 {
     IM_UNUSED(ctx);
     ImGuiLayoutState* layout_state = (ImGuiLayoutState*)hook->UserData;
