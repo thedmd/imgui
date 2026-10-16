@@ -40,6 +40,10 @@ Other Changes:
   size. Fixed the nav cursor, outlines and other decorations drawn around items at the edge of a
   layout being cut, draw calls no longer batching across layouts, and content moved by the root
   layout being clipped for one frame. Fixed-size axes still clip contents that overflow them.
+- Nested layouts: fixed an automatic parent never shrinking when a nested layout with springs is
+  wrapped in BeginGroup()/EndGroup(). Inside such a group, the item rect of the nested layout
+  (GetItemRectMin()/GetItemRectMax() after EndHorizontal()/EndVertical()) is its own size rather
+  than the size it grows to in the parent.
 - Layout: items outside of stack layouts no longer cost a lookup of the layout state.
 - Context: layout state is kept per context and per window, instead of in a process-global map.
   Fixed crashes and hooks piling up with one context per thread (thread-local GImGui), and

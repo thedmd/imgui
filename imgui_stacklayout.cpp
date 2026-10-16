@@ -114,6 +114,7 @@ struct ImGuiLayout
     float                       LastTimeUsed;
     int                         InstanceCount;      // Further uses of the ID in the current frame.
     int                         IDStackSize;        // Size of the ID stack before BeginLayout() pushed the ID.
+    int                         GroupStackSize;     // Size of the group stack when BeginLayout() was called.
     ImVec2                      Size;               // Size passed to BeginLayout
     ImVec2                      CurrentSize;        // Bounds of layout known at the beginning the frame.
     ImVec2                      MinimumSize;        // Minimum possible size when springs are collapsed.
@@ -151,6 +152,7 @@ struct ImGuiLayout
         LastTimeUsed = -1.0f;
         InstanceCount = 0;
         IDStackSize = 0;
+        GroupStackSize = 0;
         Size = CurrentSize = MinimumSize = MeasuredSize = ImVec2(0, 0);
         CurrentItemIndex = 0;
         ParentItemIndex = 0;
@@ -437,6 +439,7 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     layout->LastFrameUsed = g.FrameCount;
     layout->LastTimeUsed = (float)g.Time;
     layout->IDStackSize = id_stack_size;
+    layout->GroupStackSize = g.GroupStack.Size;
 
     PushLayout(layout);
 
@@ -548,7 +551,10 @@ static void EndLayout(ImGuiLayoutWindowState* window_state)
     window->DC.IsSameLine = layout->BackupIsSameLine;
     window->DC.LayoutType = layout->BackupLayoutType;
     ImGui::ItemSize(new_size);
-    ImGui::ItemAdd(ImRect(layout->StartPos, layout->StartPos + measured_size), 0);
+    // The item rect includes the inflation to the parent, which GetItemRect*() users draw with, except inside a group
+    // opened in the parent: EndGroup() would include it, feeding the parent's size back into itself.
+    const bool in_group_of_parent = layout->Parent != NULL && layout->GroupStackSize > layout->Parent->GroupStackSize;
+    ImGui::ItemAdd(ImRect(layout->StartPos, layout->StartPos + (in_group_of_parent ? new_size : measured_size)), 0);
 
     // The parent measures this layout by the size given to ItemSize(), without the inflation in the item rect.
     if (window_state->CurrentLayout)
