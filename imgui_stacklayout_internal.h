@@ -19,10 +19,10 @@ Index of this file:
 // [SECTION] Stack Layout Internal API
 //-----------------------------------------------------------------------------
 
-namespace ImGuiInternal
+namespace ImGuiStackLayout
 {
-    IMGUI_API void            LayoutErrorRecoveryTryToRecoverWindowState(ImGuiID window_id);
-} // namespace ImGuiInternal
+    IMGUI_API void ErrorRecoveryTryToRecoverWindowState(ImGuiID window_id);
+} // namespace ImGuiStackLayout
 
 
 #endif // #ifndef IMGUI_DISABLE

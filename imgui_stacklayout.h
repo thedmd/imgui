@@ -37,6 +37,8 @@ Other Changes:
 - Layout: fixed a crash ending a layout begun while its parent was suspended, and on nested
   SuspendLayout() calls.
 - Layout: items outside of stack layouts no longer cost a lookup of the layout state.
+- Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
+  the global and ImGui namespaces, where same-named user code or future Dear ImGui code clash.
 
 -----------------------------------------------------------------------
  2026/10/11 (Stack Layout v2.1, Dear ImGui 1.93.0 WIP)
