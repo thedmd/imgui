@@ -4660,6 +4660,309 @@ static void InputTextReconcileUndoState(ImGuiInputTextState* state, const char* 
                 p[i] = old_buf[first_diff + i];
 }
 
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+// State of the field as exchanged with the platform: the caret on both ends of the selection when nothing is selected.
+static void InputTextPlatformGetOurs(const ImGuiInputTextState* state, ImGuiPlatformTextInputData* out_data)
+{
+    out_data->Text = state->TextA.Data;
+    out_data->TextLen = state->TextLen;
+    out_data->SelectionStart = state->HasSelection() ? state->Stb->select_start : state->Stb->cursor;
+    out_data->SelectionEnd = state->HasSelection() ? state->Stb->select_end : state->Stb->cursor;
+}
+
+static bool InputTextPlatformStateMatches(const ImGuiInputTextPlatformState* s, const ImGuiPlatformTextInputData* data, bool any_direction)
+{
+    if (s->Text.Size != data->TextLen || (data->TextLen > 0 && memcmp(s->Text.Data, data->Text, (size_t)data->TextLen) != 0))
+        return false;
+    if (s->CompositionStart != data->CompositionStart || s->CompositionEnd != data->CompositionEnd)
+        return false;
+    if (s->SelectionStart == data->SelectionStart && s->SelectionEnd == data->SelectionEnd)
+        return true;
+    return any_direction && s->SelectionStart == data->SelectionEnd && s->SelectionEnd == data->SelectionStart;
+}
+
+static bool InputTextPlatformStateMatchesOurs(const ImGuiInputTextPlatformState* s, const ImGuiInputTextState* state)
+{
+    ImGuiPlatformTextInputData ours;
+    InputTextPlatformGetOurs(state, &ours);
+    return InputTextPlatformStateMatches(s, &ours, false);
+}
+
+static void InputTextPlatformStateStore(ImGuiInputTextPlatformState* s, const ImGuiPlatformTextInputData* data)
+{
+    s->Text.resize(data->TextLen);
+    if (data->TextLen > 0)
+        memcpy(s->Text.Data, data->Text, (size_t)data->TextLen);
+    s->SelectionStart = data->SelectionStart;
+    s->SelectionEnd = data->SelectionEnd;
+    s->CompositionStart = data->CompositionStart;
+    s->CompositionEnd = data->CompositionEnd;
+}
+
+static void InputTextPlatformStateStoreOurs(ImGuiInputTextPlatformState* s, const ImGuiInputTextState* state)
+{
+    ImGuiPlatformTextInputData ours;
+    InputTextPlatformGetOurs(state, &ours);
+    InputTextPlatformStateStore(s, &ours);
+}
+
+// Position in the adopted text of a position in the platform text: kept before the span, shifted after it, and within it, moved
+// with the characters kept or to the next one.
+static int InputTextPlatformMapPosition(int pos, int prefix, int span_end, const ImVector<int>& span_map, int new_suffix_start, int suffix_removed)
+{
+    if (pos <= prefix)
+        return pos;
+    if (pos >= span_end)
+        return new_suffix_start + ImMax(pos - span_end - suffix_removed, 0);
+    return prefix + span_map[pos - prefix];
+}
+
+// Apply the platform state as if typed. Only the span which differs from our text is applied: its characters are filtered as pasted text
+// ('\n' becomes a space in single-line fields), it is cut to the capacity, and in overwrite mode it replaces as many characters after it.
+// An undefined selection leaves the caret after the span, or where it was when the text did not change.
+// Outputs the composition range in the adopted text, -1 when there is none.
+static void InputTextPlatformAdopt(ImGuiInputTextState* state, ImGuiInputTextCallback callback, void* callback_user_data, const ImGuiPlatformTextInputData* data, int* out_composition_start, int* out_composition_end)
+{
+    ImGuiContext& g = *state->Ctx;
+    const char* old_text = state->TextA.Data;
+    const int old_len = state->TextLen;
+    const char* text = data->Text;
+    const int text_len = data->TextLen;
+
+    // Span which differs, between a common prefix and suffix cut on character boundaries
+    const int min_len = ImMin(old_len, text_len);
+    int prefix = 0;
+    while (prefix < min_len && old_text[prefix] == text[prefix])
+        prefix++;
+    while (prefix > 0 && ((prefix < text_len && (text[prefix] & 0xC0) == 0x80) || (prefix < old_len && (old_text[prefix] & 0xC0) == 0x80)))
+        prefix--;
+    int suffix = 0;
+    while (suffix < min_len - prefix && old_text[old_len - 1 - suffix] == text[text_len - 1 - suffix])
+        suffix++;
+    while (suffix > 0 && (text[text_len - suffix] & 0xC0) == 0x80)
+        suffix--;
+    const int span_end = text_len - suffix;
+
+    // Filter the span, with the caret at the insertion point for CallbackCharFilter, as when typing
+    const int backup_cursor = state->Stb->cursor;
+    const int backup_select_start = state->Stb->select_start;
+    const int backup_select_end = state->Stb->select_end;
+    const bool is_resizable = (state->Flags & ImGuiInputTextFlags_CallbackResize) != 0;
+    const int max_inserted_len = is_resizable ? INT_MAX : ImMax(state->BufCapacity - 1 - prefix - suffix, 0);
+    ImVector<char> inserted;
+    ImVector<int> span_map; // Offset in 'inserted' of each byte of the span, and of its end
+    span_map.resize(span_end - prefix + 1);
+    int inserted_count = 0;
+    int src = prefix;
+    while (src < span_end)
+    {
+        unsigned int c;
+        const int src_len = ImMax(ImTextCharFromUtf8(&c, text + src, text + span_end), 1); // Zero bytes consume nothing
+        span_map[src - prefix] = inserted.Size;
+        state->Stb->cursor = state->Stb->select_start = state->Stb->select_end = prefix + inserted.Size;
+        if (InputTextFilterCharacter(&g, state, &c, callback, callback_user_data, true))
+        {
+            char c_utf8[5];
+            const int c_len = ImTextCharToUtf8(c_utf8, c);
+            if (inserted.Size + c_len > max_inserted_len)
+                break;
+            inserted.resize(inserted.Size + c_len);
+            memcpy(inserted.Data + inserted.Size - c_len, c_utf8, (size_t)c_len);
+            inserted_count++;
+        }
+        for (int n = 1; n < src_len; n++)
+            span_map[src - prefix + n] = inserted.Size;
+        src += src_len;
+    }
+    for (; src <= span_end; src++)
+        span_map[src - prefix] = inserted.Size;
+    state->Stb->cursor = backup_cursor;
+    state->Stb->select_start = backup_select_start;
+    state->Stb->select_end = backup_select_end;
+
+    // Overwrite mode: an insertion replaces as many characters after it
+    int suffix_removed = 0;
+    if (state->Stb->insert_mode && prefix == old_len - suffix && inserted_count > 0)
+    {
+        const char* p = old_text + old_len - suffix;
+        const char* p_end = old_text + old_len;
+        for (int n = 0; n < inserted_count && p < p_end; n++)
+        {
+            unsigned int c;
+            p += ImMax(ImTextCharFromUtf8(&c, p, p_end), 1);
+        }
+        suffix_removed = (int)(p - (old_text + old_len - suffix));
+    }
+
+    const int new_suffix_start = prefix + inserted.Size;
+    const int new_len = new_suffix_start + suffix - suffix_removed;
+    const bool text_changed = suffix_removed > 0 || inserted.Size != old_len - suffix - prefix || (inserted.Size > 0 && memcmp(inserted.Data, old_text + prefix, (size_t)inserted.Size) != 0);
+    if (text_changed)
+    {
+        state->CallbackTextBackup.resize(old_len + 1);
+        memcpy(state->CallbackTextBackup.Data, old_text, (size_t)old_len + 1);
+        const char* backup = state->CallbackTextBackup.Data;
+        if (new_len + 1 > state->TextA.Size)
+            state->TextA.resize(new_len + 1);
+        char* new_text = state->TextA.Data;
+        if (inserted.Size > 0)
+            memcpy(new_text + prefix, inserted.Data, (size_t)inserted.Size);
+        memcpy(new_text + new_suffix_start, backup + old_len - suffix + suffix_removed, (size_t)(suffix - suffix_removed));
+        new_text[new_len] = 0;
+        InputTextReconcileUndoState(state, backup, old_len, new_text, new_len);
+        state->TextLen = new_len;
+        state->TextSrc = new_text;
+        state->EditedBefore = state->EditedThisFrame = true;
+    }
+
+    *out_composition_start = *out_composition_end = -1;
+    if (data->CompositionStart >= 0)
+    {
+        const int composition_start = InputTextPlatformMapPosition(data->CompositionStart, prefix, span_end, span_map, new_suffix_start, suffix_removed);
+        const int composition_end = InputTextPlatformMapPosition(data->CompositionEnd, prefix, span_end, span_map, new_suffix_start, suffix_removed);
+        if (composition_start < composition_end)
+        {
+            *out_composition_start = composition_start;
+            *out_composition_end = composition_end;
+        }
+    }
+    if (!text_changed && data->SelectionStart < 0)
+        return;
+
+    int new_selection_start, new_selection_end;
+    if (data->SelectionStart < 0)
+    {
+        new_selection_start = new_selection_end = new_suffix_start;
+    }
+    else
+    {
+        new_selection_start = InputTextPlatformMapPosition(data->SelectionStart, prefix, span_end, span_map, new_suffix_start, suffix_removed);
+        new_selection_end = InputTextPlatformMapPosition(data->SelectionEnd, prefix, span_end, span_map, new_suffix_start, suffix_removed);
+        while (new_selection_start < new_len && (state->TextA.Data[new_selection_start] & 0xC0) == 0x80)
+            new_selection_start++;
+        while (new_selection_end < new_len && (state->TextA.Data[new_selection_end] & 0xC0) == 0x80)
+            new_selection_end++;
+    }
+    state->Stb->select_start = new_selection_start;
+    state->Stb->select_end = new_selection_end;
+    state->Stb->cursor = new_selection_end;
+    state->Stb->has_preferred_x = 0;
+    state->CursorFollow = true;
+    state->CursorAnimReset();
+}
+
+// Called by Platform_GetTextInputDataFn() with the state of the platform editor.
+// Only a change of that state is an edit: a repeated state is an editor which has not applied our Set yet, or dropped it.
+static void InputTextPlatformReceive(const ImGuiPlatformTextInputData* data, void* user_data)
+{
+    ImGuiContext& g = *(ImGuiContext*)user_data;
+    ImGuiInputTextPlatformSyncState* sync = &g.InputTextPlatformSyncState;
+    IM_ASSERT_USER_ERROR_RET(sync->InGet, "Platform_GetTextInputDataFn() must call its callback before returning!");
+    sync->Available = true;
+
+    // An undefined end makes the whole selection undefined, an empty composition is none. Positions past the text are its end.
+    ImGuiPlatformTextInputData platform = *data;
+    platform.Text = (data->Text != NULL) ? data->Text : "";
+    platform.TextLen = (data->Text == NULL) ? 0 : (data->TextLen < 0) ? (int)ImStrlen(data->Text) : data->TextLen;
+    if (platform.SelectionStart < 0 || platform.SelectionEnd < 0)
+        platform.SelectionStart = platform.SelectionEnd = -1;
+    else
+    {
+        platform.SelectionStart = ImMin(platform.SelectionStart, platform.TextLen);
+        platform.SelectionEnd = ImMin(platform.SelectionEnd, platform.TextLen);
+    }
+    platform.CompositionStart = ImMin(platform.CompositionStart, platform.TextLen);
+    platform.CompositionEnd = ImMin(platform.CompositionEnd, platform.TextLen);
+    if (platform.CompositionStart < 0 || platform.CompositionStart >= platform.CompositionEnd)
+        platform.CompositionStart = platform.CompositionEnd = -1;
+
+    if (platform.ID != sync->ID)
+    {
+        // State of another field, from an editor which has not applied our Set yet.
+        if (platform.ID != 0)
+            return;
+        // The editor holds no state of ours (e.g. it was restarted): send ours, unless it is still the state from before our last Set.
+        if (sync->Valid && sync->SetPending && sync->HasPlatform && InputTextPlatformStateMatches(&sync->Platform, &platform, false))
+            return;
+        sync->Valid = false;
+    }
+    if (!sync->Valid)
+    {
+        // Our state is sent at the end of the frame. Until the editor applies it, it may keep reporting this one.
+        InputTextPlatformStateStore(&sync->Platform, &platform);
+        sync->HasPlatform = true;
+        return;
+    }
+    if (platform.Submit)
+        sync->Submitted = true;
+    if (sync->HasPlatform && InputTextPlatformStateMatches(&sync->Platform, &platform, false))
+        return;
+    InputTextPlatformStateStore(&sync->Platform, &platform);
+    sync->HasPlatform = true;
+
+    // The first change after our Set may be its echo, possibly with the selection ordered.
+    const bool echo_expected = sync->SetPending;
+    sync->SetPending = false;
+    if (echo_expected && InputTextPlatformStateMatches(&sync->Synced, &platform, true))
+        return;
+
+    // Our side changed too (e.g. user buffer reloaded): keep it, it is sent at the end of the frame.
+    if (sync->OurChanged)
+        return;
+
+    ImGuiInputTextState* state = sync->GetState;
+    InputTextPlatformAdopt(state, sync->GetCallback, sync->GetCallbackUserData, &platform, &sync->CompositionStart, &sync->CompositionEnd);
+    InputTextPlatformStateStoreOurs(&sync->Synced, state);
+
+    // Altered by filtering: send the result back once the composition is over, not to interrupt it
+    if (platform.CompositionStart < 0 && !InputTextPlatformStateMatches(&sync->Synced, &platform, true))
+        sync->SendRequested = true;
+}
+
+// The input flags which tell the platform how to set up its editor. Numeric fields of InputScalar() only have the internal _LocalizeDecimalPoint.
+static ImGuiPlatformTextInputFlags InputTextPlatformGetFlags(ImGuiInputTextFlags flags)
+{
+    ImGuiPlatformTextInputFlags out_flags = ImGuiPlatformTextInputFlags_None;
+    if (flags & ImGuiInputTextFlags_Multiline)
+        out_flags |= ImGuiPlatformTextInputFlags_Multiline;
+    if (flags & ImGuiInputTextFlags_Password)
+        out_flags |= ImGuiPlatformTextInputFlags_Password;
+    if (flags & ImGuiInputTextFlags_CharsHexadecimal)
+        out_flags |= ImGuiPlatformTextInputFlags_Hexadecimal;
+    else if (flags & ImGuiInputTextFlags_CharsScientific)
+        out_flags |= ImGuiPlatformTextInputFlags_Scientific;
+    else if (flags & (ImGuiInputTextFlags_CharsDecimal | (ImGuiInputTextFlags)ImGuiInputTextFlags_LocalizeDecimalPoint))
+        out_flags |= ImGuiPlatformTextInputFlags_Decimal;
+    if (flags & ImGuiInputTextFlags_CharsUppercase)
+        out_flags |= ImGuiPlatformTextInputFlags_Uppercase;
+    if (flags & ImGuiInputTextFlags_CharsNoBlank)
+        out_flags |= ImGuiPlatformTextInputFlags_NoBlank;
+    return out_flags;
+}
+
+// Send our state when it changed since the last synchronization, or when requested (session start, adoption altered by filtering).
+static void InputTextPlatformSend(ImGuiInputTextState* state, const char* hint, ImGuiID viewport_id)
+{
+    ImGuiContext& g = *state->Ctx;
+    ImGuiInputTextPlatformSyncState* sync = &g.InputTextPlatformSyncState;
+    if (sync->Valid && !sync->SendRequested && InputTextPlatformStateMatchesOurs(&sync->Synced, state))
+        return;
+    InputTextPlatformStateStoreOurs(&sync->Synced, state);
+    sync->Valid = sync->SetPending = true;
+    sync->SendRequested = false;
+    sync->CompositionStart = sync->CompositionEnd = -1;
+
+    ImGuiPlatformTextInputData data;
+    data.ID = state->ID;
+    data.Flags = InputTextPlatformGetFlags(state->Flags);
+    data.BufSize = (state->Flags & ImGuiInputTextFlags_CallbackResize) ? -1 : state->BufCapacity;
+    data.ViewportId = viewport_id;
+    data.Hint = hint;
+    InputTextPlatformGetOurs(state, &data);
+    g.PlatformIO.Platform_SetTextInputDataFn(&g, &data);
+}
+#endif
+
 // As InputText() retain textual data and we currently provide a path for user to not retain it (via local variables)
 // we need some form of hook to reapply data back to user buffer on deactivation frame. (#4714)
 // It would be more desirable that we discourage users from taking advantage of the "user not retaining data" trick,
@@ -5085,6 +5388,36 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
         state->BufCapacity = buf_size;
         state->WrapWidth = wrap_width;
 
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+        // Adopt edits made in the platform text editor before our own inputs, so they reach the user buffer this frame.
+        // A field submitted twice in a frame synchronizes once. A frame without the field ends the session.
+        ImGuiInputTextPlatformSyncState* platform_sync = &g.InputTextPlatformSyncState;
+        if (!is_readonly && g.PlatformIO.Platform_GetTextInputDataFn != NULL && g.PlatformIO.Platform_SetTextInputDataFn != NULL && !(platform_sync->ID == id && platform_sync->LastFrame == g.FrameCount))
+        {
+            if (platform_sync->ID != id || platform_sync->LastFrame != g.FrameCount - 1)
+            {
+                platform_sync->ClearFreeMemory();
+                platform_sync->ID = id;
+            }
+            platform_sync->LastFrame = g.FrameCount;
+            platform_sync->OurChanged = platform_sync->Valid && !InputTextPlatformStateMatchesOurs(&platform_sync->Synced, state);
+            platform_sync->Available = platform_sync->Submitted = false;
+            platform_sync->GetState = state;
+            platform_sync->GetCallback = callback;
+            platform_sync->GetCallbackUserData = callback_user_data;
+            platform_sync->InGet = true;
+            g.PlatformIO.Platform_GetTextInputDataFn(&g, InputTextPlatformReceive, &g);
+            platform_sync->InGet = false;
+            if (!platform_sync->Available)
+            {
+                platform_sync->Valid = false;
+                platform_sync->CompositionStart = platform_sync->CompositionEnd = -1;
+            }
+            else if (!platform_sync->Valid)
+                platform_sync->SendRequested = true;
+        }
+#endif
+
         // Although we are active we don't prevent mouse from hovering other elements unless we are interacting right now with the widget.
         // Down the line we should have a cleaner library-wide concept of Selected vs Active.
         g.ActiveIdAllowOverlap = !io.MouseDown[0];
@@ -5361,6 +5694,20 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
             }
         }
 
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+        // Submitted by the platform text editor (e.g. Enter or Done): validate, as Enter does in a single-line field
+        const ImGuiInputTextPlatformSyncState* platform_sync = &g.InputTextPlatformSyncState;
+        if (!validated && platform_sync->ID == id && platform_sync->LastFrame == g.FrameCount && platform_sync->Submitted)
+        {
+            validated = clear_active_id = true;
+            if (io.ConfigInputTextEnterKeepActive && !is_multiline)
+            {
+                state->SelectAll();
+                g.InputTextReactivateId = id;
+            }
+        }
+#endif
+
         // Update render selection flag after events have been handled, so selection highlight can be displayed during the same frame.
         render_selection |= state->HasSelection() && (RENDER_SELECTION_WHEN_INACTIVE || render_cursor);
     }
@@ -5499,6 +5846,13 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
                 apply_new_text_length = value_changed ? state->TextLen : 0;
             }
         }
+
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+        // Send our state after callbacks, which may have changed it (e.g. history)
+        const ImGuiInputTextPlatformSyncState* platform_sync = &g.InputTextPlatformSyncState;
+        if (!is_readonly && platform_sync->ID == id && platform_sync->LastFrame == g.FrameCount && platform_sync->Available && g.PlatformIO.Platform_SetTextInputDataFn != NULL)
+            InputTextPlatformSend(state, hint, window->Viewport->ID);
+#endif
     }
 
     // Handle reapplying final data on deactivation (see InputTextDeactivateHook() for details)
@@ -5737,6 +6091,37 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
                 draw_window->DrawList->AddRectFilled(rect.Min, rect.Max, bg_color);
             }
         }
+
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+        // Underline the composition of the platform text editor
+        const ImGuiInputTextPlatformSyncState* platform_sync = &g.InputTextPlatformSyncState;
+        if (platform_sync->ID == id && platform_sync->LastFrame == g.FrameCount && platform_sync->CompositionStart >= 0 && !is_displaying_hint)
+        {
+            const float line_offy = g.FontSize + ImFloor(g.FontBaked->Descent * g.FontBakedScale * 0.20f);
+            const float line_thickness = ImMax(1.0f, (float)(int)g.Style._MainScale); // FIXME-DPI
+            const char* text_composition_begin = buf_display + platform_sync->CompositionStart;
+            const char* text_composition_end = buf_display + platform_sync->CompositionEnd;
+            for (int line_n = line_visible_n0; line_n < line_visible_n1; line_n++)
+            {
+                const char* p = line_index->get_line_begin(buf_display, line_n);
+                const char* p_eol = line_index->get_line_end(buf_display, line_n);
+                if (p_eol < buf_display_end && *p_eol != '\n')
+                    p_eol++; // Wrapped line
+                const char* line_composition_begin = (text_composition_begin > p) ? text_composition_begin : p;
+                const char* line_composition_end = (text_composition_end < p_eol) ? text_composition_end : p_eol;
+                if (line_composition_begin >= line_composition_end)
+                    continue;
+
+                ImRect rect;
+                rect.Min.x = draw_pos.x - draw_scroll.x + CalcTextSize(p, line_composition_begin).x;
+                rect.Min.y = draw_pos.y - draw_scroll.y + line_n * g.FontSize + line_offy;
+                rect.Max.x = rect.Min.x + CalcTextSize(line_composition_begin, line_composition_end).x;
+                rect.Max.y = rect.Min.y + line_thickness;
+                rect.ClipWith(clip_rect);
+                draw_window->DrawList->AddRectFilled(rect.Min, rect.Max, text_col);
+            }
+        }
+#endif
     }
 
     // Find render position for right alignment (single-line only)
