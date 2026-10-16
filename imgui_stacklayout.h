@@ -76,6 +76,8 @@ Other Changes:
   ImGuiLayoutDebugFlags_DrawItems: the layout draws its springs or items where it placed them.
 - Docs: the ID scope of layouts is documented with BeginHorizontal()/BeginVertical(), with how to
   open a popup inside a layout and begin it outside.
+- Examples: added imgui_stacklayout.cpp to the example projects (Visual Studio, Makefiles,
+  CMake, Xcode, QNX), which did not link without it.
 - Demo: added style.LayoutAlign to the style editor.
 - Demo: springs are drawn with ImGuiLayoutDebugFlags_DrawSprings. The demo drew them from
   GetItemRect*() after Spring(), which held the previous item when a spring submitted none, and
