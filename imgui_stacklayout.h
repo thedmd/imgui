@@ -72,6 +72,7 @@ Other Changes:
   once per spring that changed size.
 - Docs: the ID scope of layouts is documented with BeginHorizontal()/BeginVertical(), with how to
   open a popup inside a layout and begin it outside.
+- Demo: added style.LayoutAlign to the style editor.
 - Misc: added IMGUI_STACK_LAYOUT_VERSION and IMGUI_STACK_LAYOUT_VERSION_NUM.
 - Misc: the headers of the stack layout files no longer quote a Dear ImGui version.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in

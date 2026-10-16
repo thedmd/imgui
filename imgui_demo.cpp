@@ -8949,6 +8949,10 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
             SameLine(); HelpMarker("Alignment applies when a button is larger than its text content.");
             SliderFloat2("SelectableTextAlign", (float*)&style.SelectableTextAlign, 0.0f, 1.0f, "%.2f");
             SameLine(); HelpMarker("Alignment applies when a selectable is larger than its text content.");
+#ifdef IMGUI_HAS_STACK_LAYOUT
+            SliderFloat("LayoutAlign", &style.LayoutAlign, 0.0f, 1.0f, "%.2f");
+            SameLine(); HelpMarker("Alignment of items on the other axis of BeginHorizontal()/BeginVertical() layouts, when they are given no alignment.");
+#endif
             SliderFloat("SeparatorSize", &style.SeparatorSize, 0.0f, 10.0f, "%.0f");
             SliderFloat("SeparatorTextBorderSize", &style.SeparatorTextBorderSize, 0.0f, 10.0f, "%.0f");
             SliderFloat2("SeparatorTextAlign", (float*)&style.SeparatorTextAlign, 0.0f, 1.0f, "%.2f");
