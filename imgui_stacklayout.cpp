@@ -141,7 +141,7 @@ struct ImGuiLayout
     ImGuiID                     ItemBeginLastItemId;
     ImRect                      ItemBeginLastItemRect;
 
-    ImDrawListSplitter          Splitter;
+    bool                        ClipRectPushed;
 
     ImGuiLayout(ImGuiID id, ImGuiLayoutType type)
     {
@@ -163,6 +163,7 @@ struct ImGuiLayout
         BackupIsSameLine = false;
         BackupLayoutType = ImGuiLayoutType_Vertical;
         ItemBeginLastItemId = 0;
+        ClipRectPushed = false;
     }
 };
 
@@ -232,9 +233,8 @@ static ImVec2           BalanceLayoutItemAlignment(ImGuiLayout& layout, ImGuiLay
 static void             BalanceLayoutItemsAlignment(ImGuiLayout& layout);
 static bool             HasAnyNonZeroSpring(ImGuiLayout& layout);
 static void             BalanceChildLayouts(ImGuiLayout& layout);
-static void             BeginLayoutClipRect(ImGuiLayout& layout);
+static void             BeginLayoutClipRect(ImGuiLayout& layout, bool measured);
 static void             EndLayoutClipRect(ImGuiLayout& layout);
-static void             ApplyLayoutClipRect(ImGuiLayout& layout);
 static ImGuiLayoutItem* GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemType type);
 static float            CalculateLayoutItemAlignmentOffset(ImGuiLayout& layout, ImGuiLayoutItem& item);
 static void             TranslateLayoutItem(ImGuiLayoutItem& item, const ImVec2& offset);
@@ -433,6 +433,7 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
         layout->InstanceCount = 0;
     }
 
+    const bool measured = (layout->LastFrameUsed == g.FrameCount - 1);
     layout->LastFrameUsed = g.FrameCount;
     layout->LastTimeUsed = (float)g.Time;
     layout->IDStackSize = id_stack_size;
@@ -468,7 +469,7 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     window->DC.Indent.x = layout->StartPos.x - window->Pos.x - window->DC.ColumnsOffset.x;
     window->DC.CurrLineSize = ImVec2(0.0f, 0.0f);
 
-    BeginLayoutClipRect(*layout);
+    BeginLayoutClipRect(*layout, measured);
 
     BeginLayoutItem(*layout);
 }
@@ -535,6 +536,8 @@ static void EndLayout(ImGuiLayoutWindowState* window_state)
     while (window->IDStack.Size > layout->IDStackSize)
         ImGui::PopID();
 
+    EndLayoutClipRect(*layout);
+
     // Restore the enclosing line, then submit the layout as one item, as EndGroup() does.
     window->DC.CursorPos = layout->StartPos;
     window->DC.CursorPosPrevLine = layout->BackupCursorPosPrevLine;
@@ -553,8 +556,6 @@ static void EndLayout(ImGuiLayoutWindowState* window_state)
 
     if (layout->Parent == NULL)
         BalanceChildLayouts(*layout);
-
-    EndLayoutClipRect(*layout);
 
     //window->DrawList->AddRect(layout->StartPos, layout->StartPos + measured_size, IM_COL32(0,255,0,255));           // [DEBUG]
     //window->DrawList->AddRect(window->DC.LastItemRect.Min, window->DC.LastItemRect.Max, IM_COL32(255,255,0,255));   // [DEBUG]
@@ -807,57 +808,24 @@ static void BalanceChildLayouts(ImGuiLayout& layout)
     BalanceLayoutItemsAlignment(layout);
 }
 
-static void BeginLayoutClipRect(ImGuiLayout& layout)
+// Only fixed-size axes clip, and only when the contents measured in the previous frame overflow them.
+static void BeginLayoutClipRect(ImGuiLayout& layout, bool measured)
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const bool clip_x = layout.Size.x > 0.0f && (!measured || layout.MinimumSize.x > layout.Size.x);
+    const bool clip_y = layout.Size.y > 0.0f && (!measured || layout.MinimumSize.y > layout.Size.y);
+    layout.ClipRectPushed = clip_x || clip_y;
+    if (!layout.ClipRectPushed)
+        return;
 
-    // Use splitter to collect draw commands in separate channel,
-    // so we can clip them to the layout bounds.
-    layout.Splitter.Split(window->DrawList, 2);
-    layout.Splitter.SetCurrentChannel(window->DrawList, 1);
-
-    // Clip to layout bounds, unrestricted and not measured bounds span
-    // all the way to the edge of the window.
-    ImVec2 clip_rect_min = layout.StartPos;
-    ImVec2 clip_rect_max;
-    clip_rect_max.x = layout.Size.x > 0.0f ? layout.StartPos.x + layout.Size.x : FLT_MAX;
-    clip_rect_max.y = layout.Size.y > 0.0f ? layout.StartPos.y + layout.Size.y : FLT_MAX;
-
+    ImVec2 clip_rect_min(clip_x ? layout.StartPos.x : -FLT_MAX, clip_y ? layout.StartPos.y : -FLT_MAX);
+    ImVec2 clip_rect_max(clip_x ? layout.StartPos.x + layout.Size.x : FLT_MAX, clip_y ? layout.StartPos.y + layout.Size.y : FLT_MAX);
     ImGui::PushClipRect(clip_rect_min, clip_rect_max, true);
 }
 
 static void EndLayoutClipRect(ImGuiLayout& layout)
 {
-    ImGui::PopClipRect();
-
-    // Layout bounds are final at this point: clamp recorded commands
-    // and merge them right away.
-    ApplyLayoutClipRect(layout);
-
-    layout.Splitter.Merge(ImGui::GetCurrentWindow()->DrawList);
-}
-
-static void ApplyLayoutClipRect(ImGuiLayout& layout)
-{
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-
-    ImVec4 current_clip_rect;
-    current_clip_rect.x = layout.StartPos.x;
-    current_clip_rect.y = layout.StartPos.y;
-    current_clip_rect.z = layout.StartPos.x + layout.MeasuredSize.x;
-    current_clip_rect.w = layout.StartPos.y + layout.MeasuredSize.y;
-
-    layout.Splitter.SetCurrentChannel(window->DrawList, 0);
-    for (ImDrawCmd& cmd : layout.Splitter._Channels[1]._CmdBuffer)
-    {
-
-        if (cmd.ClipRect.x < current_clip_rect.x) cmd.ClipRect.x = current_clip_rect.x;
-        if (cmd.ClipRect.y < current_clip_rect.y) cmd.ClipRect.y = current_clip_rect.y;
-        if (cmd.ClipRect.z > current_clip_rect.z) cmd.ClipRect.z = current_clip_rect.z;
-        if (cmd.ClipRect.w > current_clip_rect.w) cmd.ClipRect.w = current_clip_rect.w;
-    }
-
-    //GetForegroundDrawList()->AddRect(layout.StartPos, layout.StartPos + layout.MeasuredSize, IM_COL32(255,0,0,128)); // [DEBUG]
+    if (layout.ClipRectPushed)
+        ImGui::PopClipRect();
 }
 
 static ImGuiLayoutItem* GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemType type)

@@ -36,6 +36,10 @@ Other Changes:
   horizontally. This needs the fix to BeginTable() submitted to Dear ImGui with this release.
 - Layout: fixed a crash ending a layout begun while its parent was suspended, and on nested
   SuspendLayout() calls.
+- Clipping: layouts no longer split draw commands into channels or clamp them to their measured
+  size. Fixed the nav cursor, outlines and other decorations drawn around items at the edge of a
+  layout being cut, draw calls no longer batching across layouts, and content moved by the root
+  layout being clipped for one frame. Fixed-size axes still clip contents that overflow them.
 - Layout: items outside of stack layouts no longer cost a lookup of the layout state.
 - Context: layout state is kept per context and per window, instead of in a process-global map.
   Fixed crashes and hooks piling up with one context per thread (thread-local GImGui), and
