@@ -21,8 +21,6 @@ Index of this file:
 
 namespace ImGuiInternal
 {
-    IMGUI_API ImGuiLayoutType GetCurrentLayoutType(ImGuiID window_id);
-    IMGUI_API void            UpdateItemRect(ImGuiID window_id, const ImVec2& min, const ImVec2& max);
     IMGUI_API void            LayoutErrorRecoveryTryToRecoverWindowState(ImGuiID window_id);
 } // namespace ImGuiInternal
 

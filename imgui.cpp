@@ -11619,10 +11619,6 @@ bool ImGui::ItemAdd(const ImRect& bb, ImGuiID id, const ImRect* nav_bb_arg, ImGu
     g.NextItemData.HasFlags = ImGuiNextItemDataFlags_None;
     g.NextItemData.ItemFlagsSet = ImGuiItemFlags_None;
 
-#ifdef IMGUI_HAS_STACK_LAYOUT
-    ImGuiInternal::UpdateItemRect(window->ID, bb.Min, bb.Max);
-#endif
-
 #ifdef IMGUI_ENABLE_TEST_ENGINE
     if (id != 0)
         IMGUI_TEST_ENGINE_ITEM_ADD(id, g.LastItemData.NavRect, &g.LastItemData);
@@ -11722,40 +11718,6 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
     if (window->SkipItems)
         return;
 
-#ifdef IMGUI_HAS_STACK_LAYOUT
-    const ImGuiLayoutType stack_layout_type = ImGuiInternal::GetCurrentLayoutType(window->ID);
-#else
-    const ImGuiLayoutType stack_layout_type = -1;
-#endif
-
-    //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorPos, 3.0f, IM_COL32(255,255,0,255), 4); // [DEBUG] Widget position
-
-    // Stack Layouts: Handle horizontal case first to simplify merge in case code handling vertical changes.
-    if (stack_layout_type == ImGuiLayoutType_Horizontal)
-    {
-        const float line_width = ImMax(window->DC.CurrLineSize.x, size.x);
-        const float line_y1 = window->DC.CursorPos.y;
-        const float line_y2 = line_y1 + size.y;
-
-        // Always align ourselves on pixel boundaries
-        //if (g.IO.KeyAlt) window->DrawList->AddRect(window->DC.CursorPos, window->DC.CursorPos + ImVec2(size.x, line_height), IM_COL32(255,0,0,200)); // [DEBUG]
-        window->DC.CursorPosPrevLine.x = window->DC.CursorPos.x;
-        window->DC.CursorPosPrevLine.y = line_y1;
-        window->DC.CursorPos.x = IM_TRUNC(window->DC.CursorPos.x + line_width + g.Style.ItemSpacing.x);
-        window->DC.CursorPos.y = line_y1;
-        window->DC.CursorMaxPos.x = ImMax(window->DC.CursorMaxPos.x, window->DC.CursorPos.x - g.Style.ItemSpacing.x);
-        window->DC.CursorMaxPos.y = ImMax(window->DC.CursorMaxPos.y, line_y2);
-        //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorMaxPos, 3.0f, IM_COL32(255,0,0,255), 4); // [DEBUG]
-
-        window->DC.PrevLineSize.x = line_width;
-        window->DC.PrevLineSize.y = 0.0f;
-        window->DC.CurrLineSize.x = 0.0f;
-        window->DC.PrevLineTextBaseOffset = ImMax(window->DC.CurrLineTextBaseOffset, text_baseline_y);
-        window->DC.CurrLineTextBaseOffset = window->DC.PrevLineTextBaseOffset;
-        window->DC.IsSameLine = window->DC.IsSetPos = false;
-        return;
-    }
-
     // We increase the height in this function to accommodate for baseline offset.
     // In theory we should be offsetting the starting position (window->DC.CursorPos), that will be the topic of a larger refactor,
     // but since ItemSize() is not yet an API that moves the cursor (to handle e.g. wrapping) enlarging the height has the same effect.
@@ -11774,7 +11736,6 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
     window->DC.CursorMaxPos.y = ImMax(window->DC.CursorMaxPos.y, window->DC.CursorPos.y - g.Style.ItemSpacing.y);
     //if (g.IO.KeyAlt) window->DrawList->AddCircle(window->DC.CursorMaxPos, 3.0f, IM_COL32(255,0,0,255), 4); // [DEBUG]
 
-    window->DC.PrevLineSize.x = 0.0f;
     window->DC.PrevLineSize.y = line_height;
     window->DC.CurrLineSize.y = 0.0f;
     window->DC.PrevLineTextBaseOffset = ImMax(window->DC.CurrLineTextBaseOffset, text_baseline_y);
@@ -11782,7 +11743,7 @@ void ImGui::ItemSize(const ImVec2& size, float text_baseline_y)
     window->DC.IsSameLine = window->DC.IsSetPos = false;
 
     // Horizontal layout mode
-    if (stack_layout_type == -1 && window->DC.LayoutType == ImGuiLayoutType_Horizontal)
+    if (window->DC.LayoutType == ImGuiLayoutType_Horizontal)
         SameLine();
 }
 IM_MSVC_RUNTIME_CHECKS_RESTORE

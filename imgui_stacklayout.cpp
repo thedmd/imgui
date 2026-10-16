@@ -120,9 +120,20 @@ struct ImGuiLayout
     ImGuiLayout*                FirstChild;
     ImGuiLayout*                NextSibling;
     float                       Align;              // Current item alignment.
-    float                       Indent;             // Indent used to align items in vertical layout.
     ImVec2                      StartPos;           // Initial cursor position when BeginLayout is called.
     ImVec2                      StartCursorMaxPos;  // Maximum cursor position when BeginLayout is called.
+
+    // Line state of the enclosing flow, restored by EndLayout() as EndGroup() does.
+    ImVec2                      BackupCursorPosPrevLine;
+    ImVec1                      BackupIndent;
+    ImVec2                      BackupCurrLineSize;
+    float                       BackupCurrLineTextBaseOffset;
+    bool                        BackupIsSameLine;
+    ImGuiLayoutType             BackupLayoutType;
+
+    // Last item when the current layout item began, to tell whether an item was submitted inside it.
+    ImGuiID                     ItemBeginLastItemId;
+    ImRect                      ItemBeginLastItemRect;
 
     ImDrawListSplitter          Splitter;
 
@@ -136,25 +147,34 @@ struct ImGuiLayout
         ParentItemIndex = 0;
         Parent = FirstChild = NextSibling = NULL;
         Align = -1.0f;
-        Indent = 0.0f;
         StartPos = ImVec2(0, 0);
         StartCursorMaxPos = ImVec2(0, 0);
+        BackupCursorPosPrevLine = BackupCurrLineSize = ImVec2(0, 0);
+        BackupCurrLineTextBaseOffset = 0.0f;
+        BackupIsSameLine = false;
+        BackupLayoutType = ImGuiLayoutType_Vertical;
+        ItemBeginLastItemId = 0;
     }
+};
+
+struct ImGuiLayoutSuspendBackup
+{
+    ImGuiLayoutType         LayoutType;
+    ImVec2                  CursorMaxPos;
 };
 
 struct ImGuiLayoutWindowState
 {
     ImGuiWindow*            Window;
     ImGuiLayout*            CurrentLayout;
-    ImGuiLayoutItem*        CurrentLayoutItem;
     ImVector<ImGuiLayout*>  LayoutStack;
+    ImVector<ImGuiLayoutSuspendBackup> SuspendStack;
     ImGuiStorage            Layouts;
 
     ImGuiLayoutWindowState()
     {
         Window            = NULL;
         CurrentLayout     = NULL;
-        CurrentLayoutItem = NULL;
     }
 };
 
@@ -227,6 +247,7 @@ static ImGuiLayoutItem* GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemT
 static float            CalculateLayoutItemAlignmentOffset(ImGuiLayout& layout, ImGuiLayoutItem& item);
 static void             TranslateLayoutItem(ImGuiLayoutItem& item, const ImVec2& offset);
 static void             SignedIndent(float indent);
+static void             MarkLayoutLastItem(ImGuiLayout& layout);
 static void             BeginLayoutItem(ImGuiLayout& layout);
 static void             EndLayoutItem(ImGuiLayout& layout);
 static void             AddLayoutSpring(ImGuiLayout& layout, float weight, float spacing);
@@ -467,22 +488,22 @@ static void ImGui::BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, fl
     layout->CurrentSize.x = layout->Size.x > 0.0f ? layout->Size.x : layout->MinimumSize.x;
     layout->CurrentSize.y = layout->Size.y > 0.0f ? layout->Size.y : layout->MinimumSize.y;
 
+    // The layout is a block starting at the cursor, like a group: save the line it is on.
     layout->StartPos = window->DC.CursorPos;
     layout->StartCursorMaxPos = window->DC.CursorMaxPos;
+    layout->BackupCursorPosPrevLine = window->DC.CursorPosPrevLine;
+    layout->BackupIndent = window->DC.Indent;
+    layout->BackupCurrLineSize = window->DC.CurrLineSize;
+    layout->BackupCurrLineTextBaseOffset = window->DC.CurrLineTextBaseOffset;
+    layout->BackupIsSameLine = window->DC.IsSameLine;
+    layout->BackupLayoutType = window->DC.LayoutType;
+
+    // ItemSize() flows items along the layout axis. New lines start at the layout's left edge.
+    window->DC.LayoutType = type;
+    window->DC.Indent.x = layout->StartPos.x - window->Pos.x - window->DC.ColumnsOffset.x;
+    window->DC.CurrLineSize = ImVec2(0.0f, 0.0f);
 
     BeginLayoutClipRect(*layout);
-
-    if (type == ImGuiLayoutType_Vertical)
-    {
-        // Push empty item to recalculate cursor position.
-        PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-        Dummy(ImVec2(0.0f, 0.0f));
-        PopStyleVar();
-
-        // Indent horizontal position to match edge of the layout.
-        layout->Indent = layout->StartPos.x - window->DC.CursorPos.x;
-        SignedIndent(layout->Indent);
-    }
 
     BeginLayoutItem(*layout);
 }
@@ -495,14 +516,12 @@ static void ImGui::EndLayout(ImGuiLayoutType type)
     IM_UNUSED(type);
 
     ImGuiLayout* layout = window_state->CurrentLayout;
+    ImGuiWindow* window = window_state->Window;
 
     EndLayoutItem(*layout);
 
     if (layout->CurrentItemIndex < layout->Items.Size)
         layout->Items.resize(layout->CurrentItemIndex);
-
-    if (layout->Type == ImGuiLayoutType_Vertical)
-        SignedIndent(-layout->Indent);
 
     PopLayout(layout);
 
@@ -554,17 +573,21 @@ static void ImGui::EndLayout(ImGuiLayoutType type)
 
     PopID();
 
-    ImVec2 current_layout_item_max = ImVec2(0.0f, 0.0f);
-    if (window_state->CurrentLayoutItem)
-        current_layout_item_max = ImMax(window_state->CurrentLayoutItem->MeasuredBounds.Max, layout->StartPos + new_size);
-
-    window_state->Window->DC.CursorPos    = layout->StartPos;
-    window_state->Window->DC.CursorMaxPos = layout->StartCursorMaxPos;
+    // Restore the enclosing line, then submit the layout as one item, as EndGroup() does.
+    window->DC.CursorPos = layout->StartPos;
+    window->DC.CursorPosPrevLine = layout->BackupCursorPosPrevLine;
+    window->DC.CursorMaxPos = layout->StartCursorMaxPos;
+    window->DC.Indent = layout->BackupIndent;
+    window->DC.CurrLineSize = layout->BackupCurrLineSize;
+    window->DC.CurrLineTextBaseOffset = layout->BackupCurrLineTextBaseOffset;
+    window->DC.IsSameLine = layout->BackupIsSameLine;
+    window->DC.LayoutType = layout->BackupLayoutType;
     ItemSize(new_size);
     ItemAdd(ImRect(layout->StartPos, layout->StartPos + measured_size), 0);
 
-    if (window_state->CurrentLayoutItem)
-        window_state->CurrentLayoutItem->MeasuredBounds.Max = current_layout_item_max;
+    // The parent measures this layout by the size given to ItemSize(), without the inflation in the item rect.
+    if (window_state->CurrentLayout)
+        MarkLayoutLastItem(*window_state->CurrentLayout);
 
     if (layout->Parent == NULL)
         BalanceChildLayouts(*layout);
@@ -649,7 +672,6 @@ static void ImGui::PushLayout(ImGuiLayout* layout)
 
     window_state->LayoutStack.push_back(layout);
     window_state->CurrentLayout = layout;
-    window_state->CurrentLayoutItem = NULL;
 }
 
 static void ImGui::PopLayout(ImGuiLayout* layout)
@@ -661,17 +683,7 @@ static void ImGui::PopLayout(ImGuiLayout* layout)
     IM_UNUSED(layout);
 
     window_state->LayoutStack.pop_back();
-
-    if (!window_state->LayoutStack.empty())
-    {
-        window_state->CurrentLayout = window_state->LayoutStack.back();
-        window_state->CurrentLayoutItem = &window_state->CurrentLayout->Items[window_state->CurrentLayout->CurrentItemIndex];
-    }
-    else
-    {
-        window_state->CurrentLayout = NULL;
-        window_state->CurrentLayoutItem = NULL;
-    }
+    window_state->CurrentLayout = window_state->LayoutStack.empty() ? NULL : window_state->LayoutStack.back();
 }
 
 static void ImGui::BalanceLayoutSprings(ImGuiLayout& layout)
@@ -901,9 +913,6 @@ static ImGuiLayoutItem* ImGui::GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayo
         layout.Items.push_back(ImGuiLayoutItem(type));
     }
 
-    ImGuiLayoutWindowState* window_state = GetCurrentWindowLayoutState();
-    window_state->CurrentLayoutItem = &layout.Items[layout.CurrentItemIndex];
-
     return &layout.Items[layout.CurrentItemIndex];
 }
 
@@ -953,6 +962,14 @@ static void ImGui::SignedIndent(float indent)
         Unindent(-indent);
 }
 
+// EndLayoutItem() includes the last item rect only if an item was submitted after this.
+static void ImGui::MarkLayoutLastItem(ImGuiLayout& layout)
+{
+    ImGuiContext& g = *GImGui;
+    layout.ItemBeginLastItemId = g.LastItemData.ID;
+    layout.ItemBeginLastItemRect = g.LastItemData.Rect;
+}
+
 static void ImGui::BeginLayoutItem(ImGuiLayout& layout)
 {
     ImGuiContext& g = *GImGui;
@@ -967,24 +984,27 @@ static void ImGui::BeginLayoutItem(ImGuiLayout& layout)
     // If layout changes in current frame alignment will
     // be corrected in EndLayout() to it visualy coherent.
     item.CurrentAlignOffset = CalculateLayoutItemAlignmentOffset(layout, item);
-    if (item.CurrentAlign > 0.0f)
+    if (layout.Type == ImGuiLayoutType_Horizontal)
     {
-        if (layout.Type == ImGuiLayoutType_Horizontal)
-        {
-            window->DC.CursorPos.y += item.CurrentAlignOffset;
-        }
-        else
-        {
-            float new_position = window->DC.CursorPos.x + item.CurrentAlignOffset;
-
-            // Make placement behave like in horizontal case when next
-            // widget is placed at very same Y position. This indent
-            // make sure for vertical layout placed widgets has same X position.
-            SignedIndent(item.CurrentAlignOffset);
-
-            window->DC.CursorPos.x = new_position;
-        }
+        window->DC.CursorPos.y = layout.StartPos.y + item.CurrentAlignOffset;
     }
+    else if (item.CurrentAlign > 0.0f)
+    {
+        float new_position = window->DC.CursorPos.x + item.CurrentAlignOffset;
+
+        // Make placement behave like in horizontal case when next
+        // widget is placed at very same Y position. This indent
+        // make sure for vertical layout placed widgets has same X position.
+        SignedIndent(item.CurrentAlignOffset);
+
+        window->DC.CursorPos.x = new_position;
+    }
+
+    // Each item starts its own line and is measured like a group, from what its contents extend CursorMaxPos to.
+    window->DC.CurrLineSize = ImVec2(0.0f, 0.0f);
+    window->DC.IsSameLine = false;
+    window->DC.CursorMaxPos = window->DC.CursorPos;
+    MarkLayoutLastItem(layout);
 
     item.MeasuredBounds.Min = item.MeasuredBounds.Max = window->DC.CursorPos;
     item.VertexIndexBegin = item.VertexIndexEnd = window->DrawList->VtxBuffer.Size;
@@ -997,6 +1017,11 @@ static void ImGui::EndLayoutItem(ImGuiLayout& layout)
     IM_ASSERT(layout.CurrentItemIndex < layout.Items.Size);
 
     ImGuiLayoutItem& item = layout.Items[layout.CurrentItemIndex];
+
+    // Like EndGroup(), include the last item submitted inside, for e.g. EndTable() undershooting with CursorMaxPos.
+    item.MeasuredBounds.Max = ImMax(item.MeasuredBounds.Max, window->DC.CursorMaxPos);
+    if (g.LastItemData.ID != layout.ItemBeginLastItemId || memcmp(&g.LastItemData.Rect, &layout.ItemBeginLastItemRect, sizeof(ImRect)) != 0)
+        item.MeasuredBounds.Max = ImMax(item.MeasuredBounds.Max, g.LastItemData.Rect.Max);
 
     ImDrawList* draw_list = window->DrawList;
     item.VertexIndexEnd = draw_list->VtxBuffer.Size;
@@ -1022,17 +1047,18 @@ static void ImGui::AddLayoutSpring(ImGuiLayout& layout, float weight, float spac
 {
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
-    ImGuiLayoutItem* previous_item = &layout.Items[layout.CurrentItemIndex];
+
+    EndLayoutItem(layout);
 
     // Undo item padding, spring should consume all space between items.
+    ImGuiLayoutItem* previous_item = &layout.Items[layout.CurrentItemIndex - 1];
     if (layout.Type == ImGuiLayoutType_Horizontal)
         window->DC.CursorPos.x = previous_item->MeasuredBounds.Max.x;
     else
         window->DC.CursorPos.y = previous_item->MeasuredBounds.Max.y;
+    window->DC.IsSameLine = false;
 
     previous_item = NULL; // may be invalid after call to GenerateLayoutItem()
-
-    EndLayoutItem(layout);
 
     ImGuiLayoutItem* spring_item = GenerateLayoutItem(layout, ImGuiLayoutItemType_Spring);
 
@@ -1073,6 +1099,8 @@ static void ImGui::AddLayoutSpring(ImGuiLayout& layout, float weight, float spac
         PushStyleVar(ImGuiStyleVar_ItemSpacing, ImFloor(spring_spacing));
         Dummy(ImFloor(spring_size));
         PopStyleVar();
+
+        spring_item->MeasuredBounds.Max = spring_item->MeasuredBounds.Min + ImFloor(spring_size);
     }
 
     layout.CurrentItemIndex++;
@@ -1084,23 +1112,6 @@ static void ImGui::AddLayoutSpring(ImGuiLayout& layout, float weight, float spac
 //-----------------------------------------------------------------------------
 // [SECTION] Stack Layout: Internal API
 //-----------------------------------------------------------------------------
-
-// Type of the stack layout receiving items, -1 outside of stack layouts (or while suspended).
-ImGuiLayoutType ImGuiInternal::GetCurrentLayoutType(ImGuiID window_id)
-{
-    ImGuiLayoutWindowState* state = GetWindowLayoutState(window_id);
-    return state->CurrentLayout ? state->CurrentLayout->Type : -1;
-}
-
-void ImGuiInternal::UpdateItemRect(ImGuiID window_id, const ImVec2& min, const ImVec2& max)
-{
-    ImGuiLayoutWindowState* state = GetWindowLayoutState(window_id);
-
-    if (state->CurrentLayoutItem)
-        state->CurrentLayoutItem->MeasuredBounds.Max = ImMax(state->CurrentLayoutItem->MeasuredBounds.Max, max);
-
-    IM_UNUSED(min);
-}
 
 void ImGuiInternal::LayoutErrorRecoveryTryToRecoverWindowState(ImGuiID window_id)
 {
@@ -1192,16 +1203,43 @@ void ImGui::Spring(float weight/* = 1.0f*/, float spacing/* = -1.0f*/)
 
 void ImGui::SuspendLayout()
 {
+    ImGuiWindow* window = GetCurrentWindow();
+    ImGuiLayoutWindowState* window_state = GetCurrentWindowLayoutState();
+
+    // Items in between flow as they would outside of the outermost layout, and are not measured by the layout.
+    ImGuiLayoutSuspendBackup backup;
+    backup.LayoutType = window->DC.LayoutType;
+    backup.CursorMaxPos = window->DC.CursorMaxPos;
+    window_state->SuspendStack.push_back(backup);
+    for (ImGuiLayout* layout : window_state->LayoutStack)
+    {
+        if (layout != NULL)
+        {
+            window->DC.LayoutType = layout->BackupLayoutType;
+            break;
+        }
+    }
+
     PushLayout(NULL);
 }
 
 void ImGui::ResumeLayout()
 {
+    ImGuiWindow* window = GetCurrentWindow();
     ImGuiLayoutWindowState* window_state = GetCurrentWindowLayoutState();
     IM_ASSERT(!window_state->CurrentLayout);
     IM_ASSERT(!window_state->LayoutStack.empty());
-    IM_UNUSED(window_state);
     PopLayout(NULL);
+
+    if (!window_state->SuspendStack.empty())
+    {
+        const ImGuiLayoutSuspendBackup& backup = window_state->SuspendStack.back();
+        window->DC.LayoutType = backup.LayoutType;
+        window->DC.CursorMaxPos = backup.CursorMaxPos;
+        window_state->SuspendStack.pop_back();
+    }
+    if (window_state->CurrentLayout)
+        MarkLayoutLastItem(*window_state->CurrentLayout);
 }
 
 //-----------------------------------------------------------------------------

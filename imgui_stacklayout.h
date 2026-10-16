@@ -14,6 +14,31 @@ CHANGELOG
 =========
 
 -----------------------------------------------------------------------
+ In Progress (Stack Layout v2.2, Dear ImGui 1.93.0 WIP)
+-----------------------------------------------------------------------
+
+Breaking Changes:
+
+- Layout: items flow with Dear ImGui's own layout type (window->DC.LayoutType), as in menu bars,
+  and layouts measure their items like groups. ItemSize() and ItemAdd() no longer call into
+  stack layouts. Inside horizontal layouts, Separator() draws a vertical separator,
+  MenuItem()/BeginMenu() render as in a menu bar, and NewLine() starts a new row.
+
+Other Changes:
+
+- Layout: fixed SameLine() inside horizontal layouts placing the next item over the previous
+  one. Widgets calling SameLine() (DragFloat3(), InputInt(), ColorEdit3(), ...) collapsed.
+- Layout: fixed BeginVertical() after SameLine() moving its contents down by the height of the
+  previous line, where the layout clip rect hid them.
+- Layout: fixed ImGuiListClipper inside BeginVertical() collapsing the scroll range of the
+  window: items are measured by how far they move the cursor, as in groups.
+- Layout: fixed tables without scrolling inside horizontal layouts laying out their cells
+  horizontally. This needs the fix to BeginTable() submitted to Dear ImGui with this release.
+- Layout: fixed a crash ending a layout begun while its parent was suspended, and on nested
+  SuspendLayout() calls.
+- Layout: items outside of stack layouts no longer cost a lookup of the layout state.
+
+-----------------------------------------------------------------------
  2026/10/11 (Stack Layout v2.1, Dear ImGui 1.93.0 WIP)
 -----------------------------------------------------------------------
 
