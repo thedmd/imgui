@@ -70,9 +70,16 @@ Other Changes:
   the ID stack is restored when the layout ends or resumes.
 - Springs: corrections made within the frame translate the vertices of each item once, instead of
   once per spring that changed size.
+- Springs: Spring() always submits an item, so GetItemRect*() and IsItem*() after it refer to the
+  spring. A spring with no size and no spacing used to leave the previous item there.
+- Debug: added SetNextLayoutDebugFlags() with ImGuiLayoutDebugFlags_DrawSprings and
+  ImGuiLayoutDebugFlags_DrawItems: the layout draws its springs or items where it placed them.
 - Docs: the ID scope of layouts is documented with BeginHorizontal()/BeginVertical(), with how to
   open a popup inside a layout and begin it outside.
 - Demo: added style.LayoutAlign to the style editor.
+- Demo: springs are drawn with ImGuiLayoutDebugFlags_DrawSprings. The demo drew them from
+  GetItemRect*() after Spring(), which held the previous item when a spring submitted none, and
+  sizes from the previous frame.
 - Misc: added IMGUI_STACK_LAYOUT_VERSION and IMGUI_STACK_LAYOUT_VERSION_NUM.
 - Misc: the headers of the stack layout files no longer quote a Dear ImGui version.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
@@ -138,6 +145,16 @@ Thanks to everyone who reported issues and contributed fixes:
 // [SECTION] Stack Layout API
 //-----------------------------------------------------------------------------
 
+typedef int ImGuiLayoutDebugFlags;      // -> enum ImGuiLayoutDebugFlags_   // Flags: for SetNextLayoutDebugFlags()
+
+// Flags for SetNextLayoutDebugFlags()
+enum ImGuiLayoutDebugFlags_
+{
+    ImGuiLayoutDebugFlags_None          = 0,
+    ImGuiLayoutDebugFlags_DrawSprings   = 1 << 0,   // Draw springs and their spacing.
+    ImGuiLayoutDebugFlags_DrawItems     = 1 << 1,   // Draw the bounds of the items between springs.
+};
+
 namespace ImGui
 {
     // Stack layouts: items flow along the layout, and springs share the free space by weight.
@@ -156,6 +173,7 @@ namespace ImGui
     IMGUI_API void Spring(float weight = 1.0f, float spacing = -1.0f);
     IMGUI_API void SuspendLayout();
     IMGUI_API void ResumeLayout();
+    IMGUI_API void SetNextLayoutDebugFlags(ImGuiLayoutDebugFlags flags);   // Draw the next layout and the layouts nested in it. Exact once the outermost layout ends, as their sizes settle there.
 
 } // namespace ImGui
 

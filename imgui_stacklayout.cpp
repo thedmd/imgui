@@ -143,6 +143,7 @@ struct ImGuiLayout
     ImRect                      ItemBeginLastItemRect;
 
     bool                        ClipRectPushed;
+    ImGuiLayoutDebugFlags       DebugFlags;
 
     ImGuiLayout(ImGuiID id, ImGuiLayoutType type)
     {
@@ -166,6 +167,7 @@ struct ImGuiLayout
         BackupLayoutType = ImGuiLayoutType_Vertical;
         ItemBeginLastItemId = 0;
         ClipRectPushed = false;
+        DebugFlags = ImGuiLayoutDebugFlags_None;
     }
 };
 
@@ -195,10 +197,12 @@ struct ImGuiLayoutContextState
 {
     ImGuiStorage            WindowStates;       // ImGuiLayoutWindowState* by window ID
     ImGuiLayoutWindowState* LastWindowState;
+    ImGuiLayoutDebugFlags   NextDebugFlags;
 
     ImGuiLayoutContextState()
     {
         LastWindowState = NULL;
+        NextDebugFlags = ImGuiLayoutDebugFlags_None;
     }
 };
 
@@ -245,6 +249,7 @@ static void             MarkLayoutLastItem(ImGuiLayout& layout);
 static void             BeginLayoutItem(ImGuiLayout& layout);
 static void             EndLayoutItem(ImGuiLayout& layout);
 static void             AddLayoutSpring(ImGuiLayout& layout, float weight, float spacing);
+static void             DebugDrawLayout(const ImGuiLayout& layout);
 
 
 //-----------------------------------------------------------------------------
@@ -446,6 +451,10 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
 
     PushLayout(layout);
 
+    ImGuiLayoutContextState* context_state = GetContextState(g);
+    layout->DebugFlags = context_state->NextDebugFlags | (layout->Parent ? layout->Parent->DebugFlags : ImGuiLayoutDebugFlags_None);
+    context_state->NextDebugFlags = ImGuiLayoutDebugFlags_None;
+
     if (layout->Size.x != size.x || layout->Size.y != size.y)
         layout->Size = size;
 
@@ -565,6 +574,9 @@ static void EndLayout(ImGuiLayoutWindowState* window_state)
 
     if (layout->Parent == NULL)
         BalanceChildLayouts(*layout);
+
+    if (layout->DebugFlags != ImGuiLayoutDebugFlags_None)
+        DebugDrawLayout(*layout);
 
     //window->DrawList->AddRect(layout->StartPos, layout->StartPos + measured_size, IM_COL32(0,255,0,255));           // [DEBUG]
     //window->DrawList->AddRect(window->DC.LastItemRect.Min, window->DC.LastItemRect.Max, IM_COL32(255,255,0,255));   // [DEBUG]
@@ -1022,30 +1034,78 @@ static void AddLayoutSpring(ImGuiLayout& layout, float weight, float spacing)
     if (spring_item->SpringSpacing != spacing)
         spring_item->SpringSpacing = spacing;
 
-    if (spring_item->SpringSize > 0.0f || spacing > 0.0f)
+    // Submitted even when empty, so that GetItemRect*() and IsItem*() after Spring() refer to the spring.
+    ImVec2 spring_size, spring_spacing;
+    if (layout.Type == ImGuiLayoutType_Horizontal)
     {
-        ImVec2 spring_size, spring_spacing;
-        if (layout.Type == ImGuiLayoutType_Horizontal)
-        {
-            spring_spacing = ImVec2(0.0f, g.Style.ItemSpacing.y);
-            spring_size    = ImVec2(spacing + spring_item->SpringSize, layout.CurrentSize.y);
-        }
-        else
-        {
-            spring_spacing = ImVec2(g.Style.ItemSpacing.x, 0.0f);
-            spring_size    = ImVec2(layout.CurrentSize.x, spacing + spring_item->SpringSize);
-        }
-
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImFloor(spring_spacing));
-        ImGui::Dummy(ImFloor(spring_size));
-        ImGui::PopStyleVar();
-
-        spring_item->MeasuredBounds.Max = spring_item->MeasuredBounds.Min + ImFloor(spring_size);
+        spring_spacing = ImVec2(0.0f, g.Style.ItemSpacing.y);
+        spring_size    = ImVec2(spacing + spring_item->SpringSize, layout.CurrentSize.y);
     }
+    else
+    {
+        spring_spacing = ImVec2(g.Style.ItemSpacing.x, 0.0f);
+        spring_size    = ImVec2(layout.CurrentSize.x, spacing + spring_item->SpringSize);
+    }
+
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImFloor(spring_spacing));
+    ImGui::Dummy(ImFloor(spring_size));
+    ImGui::PopStyleVar();
+
+    spring_item->MeasuredBounds.Max = spring_item->MeasuredBounds.Min + ImFloor(spring_size);
 
     layout.CurrentItemIndex++;
 
     BeginLayoutItem(layout);
+}
+
+static void DebugDrawLayout(const ImGuiLayout& layout)
+{
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const int axis = (layout.Type == ImGuiLayoutType_Horizontal) ? 0 : 1;
+    const ImRect layout_rect(layout.StartPos, layout.StartPos + layout.MeasuredSize);
+    for (const ImGuiLayoutItem& item : layout.Items)
+    {
+        if (item.Type == ImGuiLayoutItemType_Item)
+        {
+            if (layout.DebugFlags & ImGuiLayoutDebugFlags_DrawItems)
+                draw_list->AddRect(item.MeasuredBounds.Min, item.MeasuredBounds.Max, IM_COL32(255, 255, 0, 160));
+            continue;
+        }
+        if ((layout.DebugFlags & ImGuiLayoutDebugFlags_DrawSprings) == 0)
+            continue;
+
+        // Along the layout: the spring, then its spacing. Across it: the whole layout.
+        ImRect rect = item.MeasuredBounds;
+        rect.Min[axis ^ 1] = layout_rect.Min[axis ^ 1];
+        rect.Max[axis ^ 1] = layout_rect.Max[axis ^ 1];
+        const float length = rect.Max[axis] - rect.Min[axis];
+        if (length <= 0.0f)
+            continue;
+        const float spacing = ImMin(ImFloor(item.SpringSpacing), length);
+        ImRect spring_rect = rect, spacing_rect = rect;
+        spring_rect.Max[axis] = spacing_rect.Min[axis] = rect.Max[axis] - spacing;
+
+        draw_list->PushClipRect(rect.Min, rect.Max, true);
+        draw_list->AddRectFilled(spring_rect.Min, spring_rect.Max, IM_COL32(80, 20, 80, 255));
+        draw_list->AddRectFilled(spacing_rect.Min, spacing_rect.Max, IM_COL32(80, 20, 20, 255));
+
+        // Zig-zag along the middle of the spring.
+        const float zig_zag_size = 3.0f;
+        ImVec2 direction(0.0f, 0.0f);
+        direction[axis] = 1.0f;
+        ImVec2 normal(-direction.y, direction.x);
+        ImVec2 origin = ImFloor(rect.GetCenter());
+        origin[axis] = ImFloor(rect.Min[axis]);
+        origin += ImVec2(0.5f, 0.5f);
+        draw_list->PathLineTo(origin);
+        for (float x = zig_zag_size * 0.5f; x <= length - spacing; x += zig_zag_size)
+        {
+            draw_list->PathLineTo(origin + direction * x + normal * zig_zag_size);
+            normal = -normal;
+        }
+        draw_list->PathStroke(IM_COL32(255, 255, 255, 190), 1.0f);
+        draw_list->PopClipRect();
+    }
 }
 
 
@@ -1206,6 +1266,11 @@ void ImGui::ResumeLayout()
     window_state->SuspendStack.pop_back();
     if (window_state->CurrentLayout)
         ImGuiStackLayout::MarkLayoutLastItem(*window_state->CurrentLayout);
+}
+
+void ImGui::SetNextLayoutDebugFlags(ImGuiLayoutDebugFlags flags)
+{
+    ImGuiStackLayout::GetContextState(*GImGui)->NextDebugFlags = flags;
 }
 
 //-----------------------------------------------------------------------------

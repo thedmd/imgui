@@ -5534,76 +5534,6 @@ static void DemoWindowLayout()
         static float ab_spring_weight = 0.5f;
         static float alignment = 0.5f;
 
-        struct funcs
-        {
-            static void VisibleSpring(float spring_weight)
-            {
-                ImGui::Spring(spring_weight);
-                if (!draw_springs)
-                    return;
-
-                ImVec2 rect_min = ImGui::GetItemRectMin();
-                ImVec2 rect_max = ImGui::GetItemRectMax();
-
-                ImVec2 rect_size = ImGui::GetItemRectSize();
-                if (rect_size.x <= 0.0f && rect_size.y <= 0.0f)
-                    return;
-
-                // Draw zig-zag
-                float width = 0.0f, spacing = 0.0f;
-                ImVec2 direction, origin;
-                ImVec2 spacing_min, spring_max;
-
-                if (horizontal)
-                {
-                    spacing     = floorf(item_spacing.x);
-                    width       = rect_size.x - spacing;
-                    origin      = ImVec2(floorf(rect_min.x), floorf(rect_min.y + (rect_max.y - rect_min.y) / 2));
-                    direction   = ImVec2(1.0f, 0.0f);
-                    spring_max  = ImVec2(rect_min.x + width, rect_max.y);
-                    spacing_min = ImVec2(rect_min.x + width, rect_min.y);
-                }
-                else
-                {
-                    spacing     = floorf(item_spacing.y);
-                    width       = rect_size.y - spacing;
-                    origin      = ImVec2(floorf(rect_min.x + (rect_max.x - rect_min.x) / 2), floorf(rect_min.y));
-                    direction   = ImVec2(0.0f, 1.0f);
-                    spring_max  = ImVec2(rect_max.x, rect_min.y + width);
-                    spacing_min = ImVec2(rect_min.x, rect_min.y + width);
-                }
-
-                if (spring_weight <= 0.0f && spacing <= 0.0f)
-                    return;
-
-                ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-                draw_list->PushClipRect(rect_min, rect_max, true);
-
-                draw_list->AddRectFilled(rect_min, spring_max, ImColor(80, 20, 80));
-                draw_list->AddRectFilled(spacing_min, rect_max, ImColor(80, 20, 20));
-
-                const float zig_zag_size = 3;
-                ImVec2 normal = ImVec2(-direction.y, direction.x);
-
-                draw_list->PathClear();
-                origin.x += 0.5f;
-                origin.y += 0.5f;
-                draw_list->PathLineTo(origin);
-                for (float x = zig_zag_size * 0.5f; x <= width; x += zig_zag_size)
-                {
-                    ImVec2 p;
-                    p.x = origin.x + direction.x * x + normal.x * zig_zag_size;
-                    p.y = origin.y + direction.y * x + normal.y * zig_zag_size;
-                    draw_list->PathLineTo(p);
-                    normal = ImVec2(-normal.x, -normal.y);
-                }
-                draw_list->PathStroke(ImColor(255, 255, 255, 190), 1.0f);
-
-                draw_list->PopClipRect();
-            }
-        };
-
         ImGui::Checkbox("Widget A",  &widget_a);  ImGui::SameLine();
         ImGui::Checkbox("Widget B",  &widget_b);  ImGui::SameLine();
         ImGui::Checkbox("Widget C",  &widget_c);
@@ -5652,14 +5582,16 @@ static void DemoWindowLayout()
 
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(floorf(item_spacing.x), floorf(item_spacing.y)));
 
+        // The layout draws its springs: their sizes are known once the layout ends.
+        ImGui::SetNextLayoutDebugFlags(draw_springs ? ImGuiLayoutDebugFlags_DrawSprings : ImGuiLayoutDebugFlags_None);
         if (horizontal) { ImGui::BeginHorizontal("h1", layout_size, alignment); } else { ImGui::BeginVertical("v1", layout_size, alignment); }
-        if (spring_a)   { funcs::VisibleSpring(a_c_spring_weight); }
+        if (spring_a)   { ImGui::Spring(a_c_spring_weight); }
         if (widget_a)   { ImGui::Button("Widget A", widget_size); }
-        if (spring_ab)  { funcs::VisibleSpring(ab_spring_weight); }
+        if (spring_ab)  { ImGui::Spring(ab_spring_weight); }
         if (widget_b)   { ImGui::Button("Widget B", small_widget_size); }
-        if (spring_bc)  { funcs::VisibleSpring(1.0f - ab_spring_weight); }
+        if (spring_bc)  { ImGui::Spring(1.0f - ab_spring_weight); }
         if (widget_c)   { ImGui::Button("Widget C", widget_size); }
-        if (spring_c)   { funcs::VisibleSpring(a_c_spring_weight); }
+        if (spring_c)   { ImGui::Spring(a_c_spring_weight); }
         if (horizontal) { ImGui::EndHorizontal(); } else { ImGui::EndVertical(); }
 
         ImGui::PopStyleVar();
