@@ -66,6 +66,8 @@ Other Changes:
   or on the other type of layout, and ResumeLayout() without SuspendLayout().
 - Error Handling: unbalanced PushID()/PopID() inside a layout or a suspension is reported, and
   the ID stack is restored when the layout ends or resumes.
+- Springs: corrections made within the frame translate the vertices of each item once, instead of
+  once per spring that changed size.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
   the global and ImGui namespaces, where same-named user code or future Dear ImGui code clash.
 

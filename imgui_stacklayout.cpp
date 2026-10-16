@@ -678,13 +678,24 @@ static void BalanceLayoutSprings(ImGuiLayout& layout)
     const float available_space = is_auto_sized ? occupied_space : (is_horizontal ? layout.CurrentSize.x : layout.CurrentSize.y);
     const float free_space      = ImMax(available_space - occupied_space, 0.0f);
 
+    // Springs that change size move the items after them, to avoid one frame visual bugs. Offsets accumulate, so each
+    // item is translated once.
+    ImVec2 offset        = ImVec2(0.0f, 0.0f);
     float span_start     = 0.0f;
     float current_weight = 0.0f;
     for (int i = 0; i < layout.Items.Size; i++)
     {
         ImGuiLayoutItem& item = layout.Items[i];
         if (item.Type != ImGuiLayoutItemType_Spring)
+        {
+            if (offset.x != 0.0f || offset.y != 0.0f)
+            {
+                TranslateLayoutItem(item, offset);
+                item.MeasuredBounds.Min += offset;
+                item.MeasuredBounds.Max += offset;
+            }
             continue;
+        }
 
         float last_spring_size = item.SpringSize;
 
@@ -702,24 +713,14 @@ static void BalanceLayoutSprings(ImGuiLayout& layout)
             item.SpringSize = 0.0f;
         }
 
-        // If spring changed its size, fix positioning of following items to avoid one frame visual bugs.
+        item.MeasuredBounds.Min += offset;
+        item.MeasuredBounds.Max += offset;
         if (last_spring_size != item.SpringSize)
         {
             float difference = item.SpringSize - last_spring_size;
-
-            ImVec2 offset = is_horizontal ? ImVec2(difference, 0.0f) : ImVec2(0.0f, difference);
-
-            item.MeasuredBounds.Max += offset;
-
-            for (int j = i + 1; j < layout.Items.Size; j++)
-            {
-                ImGuiLayoutItem& translated_item = layout.Items[j];
-
-                TranslateLayoutItem(translated_item, offset);
-
-                translated_item.MeasuredBounds.Min += offset;
-                translated_item.MeasuredBounds.Max += offset;
-            }
+            ImVec2 spring_offset = is_horizontal ? ImVec2(difference, 0.0f) : ImVec2(0.0f, difference);
+            item.MeasuredBounds.Max += spring_offset;
+            offset += spring_offset;
         }
     }
 }
