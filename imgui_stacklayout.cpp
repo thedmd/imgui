@@ -1,4 +1,4 @@
-// dear imgui, v1.86 WIP
+// dear imgui: stack layouts
 // (stack layout code)
 
 /*

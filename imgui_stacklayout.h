@@ -1,4 +1,4 @@
-// dear imgui, v1.86 WIP
+// dear imgui: stack layouts
 // (stack layout headers)
 
 /*
@@ -70,6 +70,8 @@ Other Changes:
   the ID stack is restored when the layout ends or resumes.
 - Springs: corrections made within the frame translate the vertices of each item once, instead of
   once per spring that changed size.
+- Misc: added IMGUI_STACK_LAYOUT_VERSION and IMGUI_STACK_LAYOUT_VERSION_NUM.
+- Misc: the headers of the stack layout files no longer quote a Dear ImGui version.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
   the global and ImGui namespaces, where same-named user code or future Dear ImGui code clash.
 
@@ -121,6 +123,10 @@ Thanks to everyone who reported issues and contributed fixes:
 #pragma once
 
 #include "imgui.h"
+
+// Version of the stack layout code, independent of IMGUI_VERSION. X.Y is X * 10000 + Y * 100 in IMGUI_STACK_LAYOUT_VERSION_NUM.
+#define IMGUI_STACK_LAYOUT_VERSION       "2.2"
+#define IMGUI_STACK_LAYOUT_VERSION_NUM   20200
 
 #ifndef IMGUI_DISABLE
 

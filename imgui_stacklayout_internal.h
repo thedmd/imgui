@@ -1,5 +1,5 @@
-// dear imgui, v1.86 WIP
-// (stack layout headers)
+// dear imgui: stack layouts
+// (stack layout internal headers)
 
 /*
 
