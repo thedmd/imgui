@@ -70,6 +70,8 @@ Other Changes:
   the ID stack is restored when the layout ends or resumes.
 - Springs: corrections made within the frame translate the vertices of each item once, instead of
   once per spring that changed size.
+- Docs: the ID scope of layouts is documented with BeginHorizontal()/BeginVertical(), with how to
+  open a popup inside a layout and begin it outside.
 - Misc: added IMGUI_STACK_LAYOUT_VERSION and IMGUI_STACK_LAYOUT_VERSION_NUM.
 - Misc: the headers of the stack layout files no longer quote a Dear ImGui version.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
@@ -82,8 +84,9 @@ Other Changes:
 Breaking Changes:
 
 - IDs: BeginHorizontal()/BeginVertical() scope their contents like PushID() with the same
-  identifier, as BeginTable() and TreeNode() do. IDs of items submitted inside stack layouts
-  change: settings saved under them (e.g. tables in imgui.ini) reset once.
+  identifier, as BeginTable() and TreeNode() do. Contents were already scoped, by the layout ID
+  hashed a second time: IDs of items submitted inside stack layouts change, and settings saved
+  under them (e.g. tables in imgui.ini) reset once.
 
 Other Changes:
 
@@ -139,6 +142,8 @@ namespace ImGui
     // Stack layouts: items flow along the layout, and springs share the free space by weight.
     // - size: 0.0f = automatic, > 0.0f = fixed, < 0.0f = relative to the far edge of the content region, as in CalcItemSize() (-FLT_MIN fills it).
     // - align: position of items on the other axis, from 0.0f (left/top) to 1.0f (right/bottom). < 0.0f uses style.LayoutAlign.
+    // - IDs: contents are scoped like PushID() with the same identifier. To reach an ID across the scope, take it outside,
+    //   e.g. ImGuiID popup_id = GetID("popup") before BeginHorizontal(), OpenPopup(popup_id) inside, BeginPopup("popup") after EndHorizontal().
     IMGUI_API void BeginHorizontal(const char* str_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
     IMGUI_API void BeginHorizontal(const void* ptr_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
     IMGUI_API void BeginHorizontal(int id, const ImVec2& size = ImVec2(0, 0), float align = -1);
