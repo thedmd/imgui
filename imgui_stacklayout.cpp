@@ -413,6 +413,9 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
 
+    if (size.x < 0.0f || size.y < 0.0f)
+        size = ImGui::CalcItemSize(size, 0.0f, 0.0f);
+
     const int id_stack_size = window->IDStack.Size;
     ImGui::PushOverrideID(id);
 

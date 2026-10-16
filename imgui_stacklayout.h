@@ -19,6 +19,8 @@ CHANGELOG
 
 Breaking Changes:
 
+- Layout: sizes follow CalcItemSize(): negative values are relative to the far edge of the content
+  region (-FLT_MIN fills it). They used to mean automatic, like 0.0f.
 - Layout: items flow with Dear ImGui's own layout type (window->DC.LayoutType), as in menu bars,
   and layouts measure their items like groups. ItemSize() and ItemAdd() no longer call into
   stack layouts. Inside horizontal layouts, Separator() draws a vertical separator,
@@ -128,6 +130,9 @@ Thanks to everyone who reported issues and contributed fixes:
 
 namespace ImGui
 {
+    // Stack layouts: items flow along the layout, and springs share the free space by weight.
+    // - size: 0.0f = automatic, > 0.0f = fixed, < 0.0f = relative to the far edge of the content region, as in CalcItemSize() (-FLT_MIN fills it).
+    // - align: position of items on the other axis, from 0.0f (left/top) to 1.0f (right/bottom). < 0.0f uses style.LayoutAlign.
     IMGUI_API void BeginHorizontal(const char* str_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
     IMGUI_API void BeginHorizontal(const void* ptr_id, const ImVec2& size = ImVec2(0, 0), float align = -1.0f);
     IMGUI_API void BeginHorizontal(int id, const ImVec2& size = ImVec2(0, 0), float align = -1);
