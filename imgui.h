@@ -35,6 +35,7 @@
 #define IMGUI_HAS_TEXTURES          // Added ImGuiBackendFlags_RendererHasTextures - from IMGUI_VERSION_NUM >= 19198
 #define IMGUI_HAS_VIEWPORT          // In 'docking' WIP branch.
 #define IMGUI_HAS_DOCK              // In 'docking' WIP branch.
+#define IMGUI_HAS_IME_TEXT_INPUT    // InputText() state sync with platform text editors via platform_io.Platform_SetTextInputDataFn/Platform_GetTextInputDataFn
 
 /*
 
@@ -211,6 +212,9 @@ struct ImGuiOnceUponAFrame;         // Helper for running a block of code not mo
 struct ImGuiPayload;                // User data payload for drag and drop operations
 struct ImGuiPlatformIO;             // Interface between platform/renderer backends and ImGui (e.g. Clipboard, IME, Multi-Viewport support). Extends ImGuiIO.
 struct ImGuiPlatformImeData;        // Platform IME data for io.PlatformSetImeDataFn() function.
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+struct ImGuiPlatformTextInputData;  // Platform text input state for platform_io.Platform_SetTextInputDataFn() / Platform_GetTextInputDataFn() functions.
+#endif
 struct ImGuiPlatformMonitor;        // Multi-viewport support: user-provided bounds for each connected monitor/display. Used when positioning popups and tooltips to avoid them straddling monitors
 struct ImGuiSelectionBasicStorage;  // Optional helper to store multi-selection state + apply multi-selection requests.
 struct ImGuiSelectionExternalStorage;//Optional helper to apply multi-selection requests to existing randomly accessible storage.
@@ -270,6 +274,9 @@ typedef int ImGuiKeyChord;          // -> ImGuiKey | ImGuiMod_XXX    // Flags: f
 typedef int ImGuiListClipperFlags;  // -> enum ImGuiListClipperFlags_// Flags: for ImGuiListClipper
 typedef int ImGuiPopupFlags;        // -> enum ImGuiPopupFlags_      // Flags: for OpenPopup*(), BeginPopupContext*(), IsPopupOpen()
 typedef int ImGuiMultiSelectFlags;  // -> enum ImGuiMultiSelectFlags_// Flags: for BeginMultiSelect()
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+typedef int ImGuiPlatformTextInputFlags; // -> enum ImGuiPlatformTextInputFlags_ // Flags: for ImGuiPlatformTextInputData
+#endif
 typedef int ImGuiSelectableFlags;   // -> enum ImGuiSelectableFlags_ // Flags: for Selectable()
 typedef int ImGuiSliderFlags;       // -> enum ImGuiSliderFlags_     // Flags: for DragFloat(), DragInt(), SliderFloat(), SliderInt() etc.
 typedef int ImGuiTabBarFlags;       // -> enum ImGuiTabBarFlags_     // Flags: for BeginTabBar()
@@ -299,6 +306,9 @@ typedef ImS64 ImGuiSelectionUserData;
 // Callback and functions types
 typedef int     (*ImGuiInputTextCallback)(ImGuiInputTextCallbackData* data);    // Callback function for ImGui::InputText()
 typedef void    (*ImGuiSizeCallback)(ImGuiSizeCallbackData* data);              // Callback function for ImGui::SetNextWindowSizeConstraints()
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+typedef void    (*ImGuiPlatformTextInputCallback)(const ImGuiPlatformTextInputData* data, void* user_data); // Callback function for platform_io.Platform_GetTextInputDataFn()
+#endif
 typedef void*   (*ImGuiMemAllocFunc)(size_t sz, void* user_data);               // Function signature for ImGui::SetAllocatorFunctions()
 typedef void    (*ImGuiMemFreeFunc)(void* ptr, void* user_data);                // Function signature for ImGui::SetAllocatorFunctions()
 
@@ -4368,6 +4378,23 @@ struct ImGuiPlatformIO
     void*       Platform_ImeUserData;
     //void      (*SetPlatformImeDataFn)(ImGuiViewport* viewport, ImGuiPlatformImeData* data); // [Renamed to platform_io.PlatformSetImeDataFn in 1.91.1]
 
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+    // Optional: Keep the active InputText() in sync with a platform text editor (e.g. an on-screen keyboard which owns the text).
+    // A session lasts while the same field is active in consecutive frames. See ImGuiPlatformTextInputData.
+    // - Get: called every frame of a session, before the field takes inputs. Call 'callback' once before returning, with the editor state,
+    //   or not at all when no editor is available. Report the ID of the last Set applied: states of other fields are ignored.
+    //   Report ID 0 when the editor holds no state from Dear ImGui (e.g. it was restarted): Dear ImGui then sends its state.
+    // - Set: called at the end of a frame when the field state changed, when a session starts or an editor becomes available,
+    //   and with ID 0 when the session ends. The data is valid during the call only. The editor ends its composition: the text holds it.
+    // - Dear ImGui adopts the editor state when it changed and the field did not, as if it was typed. A repeated state is not a change,
+    //   so an editor which applies a Set late, or drops it, does not revert the field. Report back what was set as is, except for the
+    //   selection direction: a different text is adopted as an edit.
+    // - Do not call Dear ImGui from these hooks.
+    void        (*Platform_SetTextInputDataFn)(ImGuiContext* ctx, const ImGuiPlatformTextInputData* data);
+    void        (*Platform_GetTextInputDataFn)(ImGuiContext* ctx, ImGuiPlatformTextInputCallback callback, void* callback_user_data);
+    void*       Platform_TextInputUserData;
+#endif
+
     // Optional: Platform locale
     // [Experimental] Configure decimal point e.g. '.' or ',' useful for some languages (e.g. German), generally pulled from *localeconv()->decimal_point
     ImWchar     Platform_LocaleDecimalPoint;    // '.'
@@ -4486,6 +4513,45 @@ struct ImGuiPlatformImeData
 
     ImGuiPlatformImeData()          { memset((void*)this, 0, sizeof(*this)); }
 };
+
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+// Flags for ImGuiPlatformTextInputData::Flags: what the field accepts, for the platform to set up its editor (e.g. the keyboard type).
+enum ImGuiPlatformTextInputFlags_
+{
+    ImGuiPlatformTextInputFlags_None        = 0,
+    ImGuiPlatformTextInputFlags_Multiline   = 1 << 0,   // Several lines: Enter inserts a new line.
+    ImGuiPlatformTextInputFlags_Password    = 1 << 1,   // Request a secure editor. Keep the text out of logs and suggestions.
+    ImGuiPlatformTextInputFlags_Decimal     = 1 << 2,   // A number: digits, decimal point ('.' or ','), + - * /. Set for InputFloat(), InputInt(), InputScalar(), and Ctrl+click on drags and sliders.
+    ImGuiPlatformTextInputFlags_Scientific  = 1 << 3,   // A number with an exponent: as _Decimal, and e E.
+    ImGuiPlatformTextInputFlags_Hexadecimal = 1 << 4,   // Hexadecimal digits.
+    ImGuiPlatformTextInputFlags_Uppercase   = 1 << 5,   // Letters are turned uppercase.
+    ImGuiPlatformTextInputFlags_NoBlank     = 1 << 6,   // Spaces and tabs are filtered out.
+};
+
+// (Optional) State of the active InputText() exchanged with platform_io.Platform_SetTextInputDataFn() / Platform_GetTextInputDataFn().
+// - Positions are byte offsets into the UTF-8 text. Positions from the platform past the text mean its end.
+// - The part of the platform text which differs from the field is applied as pasted text: filtered by the flags and the CallbackCharFilter
+//   callback, '\n' replaced by a space in single-line fields, cut to the capacity. When that changes it, the result is sent back,
+//   once the composition is over.
+struct ImGuiPlatformTextInputData
+{
+    ImGuiID                     ID;                 // Set: ID of the InputText() widget, which changes when another field becomes active. 0 ends the session: stop the editor.
+                                                    // Get: ID of the last Set the editor applied. 0 when it holds no state from Dear ImGui (e.g. just started or restarted).
+    ImGuiPlatformTextInputFlags Flags;              // [Set only] What the field accepts. See ImGuiPlatformTextInputFlags_.
+    int                         BufSize;            // [Set only] Capacity in bytes, including the zero terminator. -1 when the buffer grows on demand (_CallbackResize).
+    ImGuiID                     ViewportId;         // [Set only] Viewport hosting the field.
+    const char*                 Hint;               // [Set only] Hint (placeholder) text of the field, zero-terminated. NULL when there is none.
+    const char*                 Text;               // UTF-8 text. Does not need to be zero-terminated.
+    int                         TextLen;            // Length of Text in bytes. Get: -1 when Text is zero-terminated.
+    int                         SelectionStart;     // Selection anchor. Get: -1 when undefined, with SelectionEnd or alone.
+    int                         SelectionEnd;       // Selection end, which is the caret position. Equal to SelectionStart when nothing is selected.
+    int                         CompositionStart;   // [Get only] Composition: text not committed yet by an input method (e.g. IME pre-edit), part of Text, underlined in the field. -1 when there is none.
+    int                         CompositionEnd;     // [Get only] End of the composition.
+    bool                        Submit;             // [Get only] The editor submitted the text (e.g. Enter or Done key): the field validates it, as Enter does in a single-line field. Report it once.
+
+    ImGuiPlatformTextInputData()    { memset((void*)this, 0, sizeof(*this)); SelectionStart = SelectionEnd = CompositionStart = CompositionEnd = -1; }
+};
+#endif
 
 //-----------------------------------------------------------------------------
 // [SECTION] Obsolete functions and types
