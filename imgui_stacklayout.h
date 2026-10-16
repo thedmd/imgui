@@ -48,6 +48,16 @@ Other Changes:
 - Context: fixed an allocation outliving DestroyContext().
 - Error Handling: layouts left open at the end of the frame while error recovery is disabled are
   reported and discarded at the next frame.
+- Error Handling: fixed the same layout ID used twice in a frame hanging builds without asserts.
+  It is reported, and each further use gets a layout state of its own, as table instances do.
+- Error Handling: fixed ErrorRecoveryTryToRecoverState() closing layouts begun before
+  ErrorRecoveryStoreState(). SuspendLayout() pushes the current ID again, which leaves item IDs
+  unchanged and orders suspensions for recovery.
+- Error Handling: misuse is reported and recovered instead of asserting, then crashing:
+  Spring() outside of a layout, EndHorizontal()/EndVertical() without a layout, while suspended
+  or on the other type of layout, and ResumeLayout() without SuspendLayout().
+- Error Handling: unbalanced PushID()/PopID() inside a layout or a suspension is reported, and
+  the ID stack is restored when the layout ends or resumes.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
   the global and ImGui namespaces, where same-named user code or future Dear ImGui code clash.
 

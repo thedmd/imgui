@@ -112,6 +112,8 @@ struct ImGuiLayout
     ImGuiLayoutType             Type;
     int                         LastFrameUsed;
     float                       LastTimeUsed;
+    int                         InstanceCount;      // Further uses of the ID in the current frame.
+    int                         IDStackSize;        // Size of the ID stack before BeginLayout() pushed the ID.
     ImVec2                      Size;               // Size passed to BeginLayout
     ImVec2                      CurrentSize;        // Bounds of layout known at the beginning the frame.
     ImVec2                      MinimumSize;        // Minimum possible size when springs are collapsed.
@@ -147,6 +149,8 @@ struct ImGuiLayout
         Type = type;
         LastFrameUsed = -1;
         LastTimeUsed = -1.0f;
+        InstanceCount = 0;
+        IDStackSize = 0;
         Size = CurrentSize = MinimumSize = MeasuredSize = ImVec2(0, 0);
         CurrentItemIndex = 0;
         ParentItemIndex = 0;
@@ -166,6 +170,7 @@ struct ImGuiLayoutSuspendBackup
 {
     ImGuiLayoutType         LayoutType;
     ImVec2                  CursorMaxPos;
+    int                     IDStackSize;        // Size of the ID stack before SuspendLayout() pushed the current ID again.
 };
 
 struct ImGuiLayoutWindowState
@@ -218,7 +223,7 @@ static void                     DestroyWindowLayoutState(ImGuiLayoutWindowState*
 static ImGuiLayout*     FindLayout(ImGuiID id, ImGuiLayoutType type);
 static ImGuiLayout*     CreateNewLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size);
 static void             BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float align);
-static void             EndLayout(ImGuiLayoutType type);
+static void             EndLayout(ImGuiLayoutWindowState* window_state);
 static ImVec2           CalculateLayoutSize(ImGuiLayout& layout, bool collapse_springs);
 static void             PushLayout(ImGuiLayout* layout);
 static void             PopLayout(ImGuiLayout* layout);
@@ -406,6 +411,7 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
 
+    const int id_stack_size = window->IDStack.Size;
     ImGui::PushOverrideID(id);
 
     // Find or create
@@ -413,10 +419,23 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     if (!layout)
         layout = CreateNewLayout(id, type, size);
 
-    IM_ASSERT(layout->LastFrameUsed != g.FrameCount && "BeginHorizontal/BeginVertical with same ID is already live in this frame. Please use PushID() to make ID's unique or rename layout.");
+    // Each further use of the ID in a frame gets a layout of its own, as table instances do.
+    if (layout->LastFrameUsed == g.FrameCount)
+    {
+        IM_ASSERT_USER_ERROR(0, "BeginHorizontal()/BeginVertical() with an ID already used in this frame! Use PushID() to make IDs unique.");
+        const int instance_no = ++layout->InstanceCount;
+        const ImGuiID instance_id = ImHashData(&instance_no, sizeof(instance_no), id);
+        ImGuiLayout* instance = FindLayout(instance_id, type);
+        layout = instance ? instance : CreateNewLayout(instance_id, type, size);
+    }
+    else
+    {
+        layout->InstanceCount = 0;
+    }
 
     layout->LastFrameUsed = g.FrameCount;
     layout->LastTimeUsed = (float)g.Time;
+    layout->IDStackSize = id_stack_size;
 
     PushLayout(layout);
 
@@ -454,13 +473,8 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     BeginLayoutItem(*layout);
 }
 
-static void EndLayout(ImGuiLayoutType type)
+static void EndLayout(ImGuiLayoutWindowState* window_state)
 {
-    ImGuiLayoutWindowState* window_state = GetCurrentWindowLayoutState();
-    IM_ASSERT(window_state->CurrentLayout);
-    IM_ASSERT(window_state->CurrentLayout->Type == type);
-    IM_UNUSED(type);
-
     ImGuiLayout* layout = window_state->CurrentLayout;
     ImGuiWindow* window = window_state->Window;
 
@@ -517,7 +531,9 @@ static void EndLayout(ImGuiLayoutType type)
     layout->CurrentSize = new_size;
     layout->MeasuredSize = measured_size;
 
-    ImGui::PopID();
+    IM_ASSERT_USER_ERROR(window->IDStack.Size == layout->IDStackSize + 1, "Mismatching PushID()/PopID() inside a layout!");
+    while (window->IDStack.Size > layout->IDStackSize)
+        ImGui::PopID();
 
     // Restore the enclosing line, then submit the layout as one item, as EndGroup() does.
     window->DC.CursorPos = layout->StartPos;
@@ -1059,30 +1075,39 @@ static void AddLayoutSpring(ImGuiLayout& layout, float weight, float spacing)
 // [SECTION] Stack Layout: Internal API
 //-----------------------------------------------------------------------------
 
-void ErrorRecoveryTryToRecoverWindowState(ImGuiID window_id)
+void ErrorRecoveryTryToRecoverWindowState(const ImGuiErrorRecoveryState* state_in)
 {
     // Called for every window, so it creates no state.
-    ImGuiLayoutContextState* context_state = FindContextState(*GImGui);
-    ImGuiLayoutWindowState* state = context_state ? (ImGuiLayoutWindowState*)context_state->WindowStates.GetVoidPtr(window_id) : NULL;
+    ImGuiContext& g = *GImGui;
+    ImGuiLayoutContextState* context_state = FindContextState(g);
+    ImGuiLayoutWindowState* state = context_state ? (ImGuiLayoutWindowState*)context_state->WindowStates.GetVoidPtr(g.CurrentWindow->ID) : NULL;
     if (state == NULL)
         return;
 
+    // Layouts and suspensions each push onto the ID stack: those begun after state_in was stored are above its size.
     while (state->LayoutStack.Size > 0) //-V1044
     {
         if (state->CurrentLayout == NULL)
         {
+            if (state->SuspendStack.back().IDStackSize < state_in->SizeOfIDStack)
+                break;
             IM_ASSERT_USER_ERROR(0, "Missing ResumeLayout()");
             ImGui::ResumeLayout();
         }
-        else if (state->CurrentLayout->Type == ImGuiLayoutType_Horizontal)
-        {
-            IM_ASSERT_USER_ERROR(0, "Missing EndHorizontal()");
-            ImGui::EndHorizontal();
-        }
         else
         {
-            IM_ASSERT_USER_ERROR(0, "Missing EndVertical()");
-            ImGui::EndVertical();
+            if (state->CurrentLayout->IDStackSize < state_in->SizeOfIDStack)
+                break;
+            if (state->CurrentLayout->Type == ImGuiLayoutType_Horizontal)
+            {
+                IM_ASSERT_USER_ERROR(0, "Missing EndHorizontal()");
+                ImGui::EndHorizontal();
+            }
+            else
+            {
+                IM_ASSERT_USER_ERROR(0, "Missing EndVertical()");
+                ImGui::EndVertical();
+            }
         }
     }
 }
@@ -1114,7 +1139,11 @@ void ImGui::BeginHorizontal(int id, const ImVec2& size/* = ImVec2(0, 0)*/, float
 
 void ImGui::EndHorizontal()
 {
-    ImGuiStackLayout::EndLayout(ImGuiLayoutType_Horizontal);
+    ImGuiStackLayout::ImGuiLayoutWindowState* window_state = ImGuiStackLayout::GetCurrentWindowLayoutState();
+    IM_ASSERT_USER_ERROR_RET(window_state->CurrentLayout != NULL || window_state->LayoutStack.Size == 0, "Calling EndHorizontal() between SuspendLayout() and ResumeLayout()!");
+    IM_ASSERT_USER_ERROR_RET(window_state->CurrentLayout != NULL, "Calling EndHorizontal() too many times!");
+    IM_ASSERT_USER_ERROR(window_state->CurrentLayout->Type == ImGuiLayoutType_Horizontal, "Calling EndHorizontal() to end a vertical layout!");
+    ImGuiStackLayout::EndLayout(window_state);
 }
 
 void ImGui::BeginVertical(const char* str_id, const ImVec2& size/* = ImVec2(0, 0)*/, float align/* = -1*/)
@@ -1137,7 +1166,11 @@ void ImGui::BeginVertical(int id, const ImVec2& size/* = ImVec2(0, 0)*/, float a
 
 void ImGui::EndVertical()
 {
-    ImGuiStackLayout::EndLayout(ImGuiLayoutType_Vertical);
+    ImGuiStackLayout::ImGuiLayoutWindowState* window_state = ImGuiStackLayout::GetCurrentWindowLayoutState();
+    IM_ASSERT_USER_ERROR_RET(window_state->CurrentLayout != NULL || window_state->LayoutStack.Size == 0, "Calling EndVertical() between SuspendLayout() and ResumeLayout()!");
+    IM_ASSERT_USER_ERROR_RET(window_state->CurrentLayout != NULL, "Calling EndVertical() too many times!");
+    IM_ASSERT_USER_ERROR(window_state->CurrentLayout->Type == ImGuiLayoutType_Vertical, "Calling EndVertical() to end a horizontal layout!");
+    ImGuiStackLayout::EndLayout(window_state);
 }
 
 // Inserts spring separator in layout
@@ -1148,7 +1181,7 @@ void ImGui::EndVertical()
 void ImGui::Spring(float weight/* = 1.0f*/, float spacing/* = -1.0f*/)
 {
     ImGuiStackLayout::ImGuiLayoutWindowState* window_state = ImGuiStackLayout::GetCurrentWindowLayoutState();
-    IM_ASSERT(window_state->CurrentLayout);
+    IM_ASSERT_USER_ERROR_RET(window_state->CurrentLayout != NULL, "Calling Spring() outside of a layout, or between SuspendLayout() and ResumeLayout()!");
 
     ImGuiStackLayout::AddLayoutSpring(*window_state->CurrentLayout, weight, spacing);
 }
@@ -1159,10 +1192,13 @@ void ImGui::SuspendLayout()
     ImGuiStackLayout::ImGuiLayoutWindowState* window_state = ImGuiStackLayout::GetCurrentWindowLayoutState();
 
     // Items in between flow as they would outside of the outermost layout, and are not measured by the layout.
+    // Pushing the current ID again leaves item IDs unchanged, and orders the suspension for error recovery.
     ImGuiStackLayout::ImGuiLayoutSuspendBackup backup;
     backup.LayoutType = window->DC.LayoutType;
     backup.CursorMaxPos = window->DC.CursorMaxPos;
+    backup.IDStackSize = window->IDStack.Size;
     window_state->SuspendStack.push_back(backup);
+    PushOverrideID(window->IDStack.back());
     for (ImGuiStackLayout::ImGuiLayout* layout : window_state->LayoutStack)
     {
         if (layout != NULL)
@@ -1179,17 +1215,17 @@ void ImGui::ResumeLayout()
 {
     ImGuiWindow* window = GetCurrentWindow();
     ImGuiStackLayout::ImGuiLayoutWindowState* window_state = ImGuiStackLayout::GetCurrentWindowLayoutState();
-    IM_ASSERT(!window_state->CurrentLayout);
-    IM_ASSERT(!window_state->LayoutStack.empty());
+    IM_ASSERT_USER_ERROR_RET(window_state->SuspendStack.Size > 0, "Calling ResumeLayout() without SuspendLayout()!");
+    IM_ASSERT_USER_ERROR_RET(window_state->CurrentLayout == NULL, "Missing EndHorizontal() or EndVertical() before ResumeLayout()!");
     ImGuiStackLayout::PopLayout(NULL);
 
-    if (!window_state->SuspendStack.empty())
-    {
-        const ImGuiStackLayout::ImGuiLayoutSuspendBackup& backup = window_state->SuspendStack.back();
-        window->DC.LayoutType = backup.LayoutType;
-        window->DC.CursorMaxPos = backup.CursorMaxPos;
-        window_state->SuspendStack.pop_back();
-    }
+    const ImGuiStackLayout::ImGuiLayoutSuspendBackup& backup = window_state->SuspendStack.back();
+    IM_ASSERT_USER_ERROR(window->IDStack.Size == backup.IDStackSize + 1, "Mismatching PushID()/PopID() between SuspendLayout() and ResumeLayout()!");
+    while (window->IDStack.Size > backup.IDStackSize)
+        PopID();
+    window->DC.LayoutType = backup.LayoutType;
+    window->DC.CursorMaxPos = backup.CursorMaxPos;
+    window_state->SuspendStack.pop_back();
     if (window_state->CurrentLayout)
         ImGuiStackLayout::MarkLayoutLastItem(*window_state->CurrentLayout);
 }

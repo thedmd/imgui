@@ -21,7 +21,7 @@ Index of this file:
 
 namespace ImGuiStackLayout
 {
-    IMGUI_API void ErrorRecoveryTryToRecoverWindowState(ImGuiID window_id);
+    IMGUI_API void ErrorRecoveryTryToRecoverWindowState(const ImGuiErrorRecoveryState* state_in);
 } // namespace ImGuiStackLayout
 
 

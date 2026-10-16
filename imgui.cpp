@@ -11360,7 +11360,7 @@ void    ImGui::ErrorRecoveryTryToRecoverWindowState(const ImGuiErrorRecoveryStat
         EndMultiSelect();
     }
 #ifdef IMGUI_HAS_STACK_LAYOUT
-    ImGuiStackLayout::ErrorRecoveryTryToRecoverWindowState(window->ID);
+    ImGuiStackLayout::ErrorRecoveryTryToRecoverWindowState(state_in);
 #endif
     if (window->DC.MenuBarAppending) //-V1044
     {
