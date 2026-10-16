@@ -110,7 +110,8 @@ struct ImGuiLayout
 {
     ImGuiID                     Id;
     ImGuiLayoutType             Type;
-    bool                        Live;
+    int                         LastFrameUsed;
+    float                       LastTimeUsed;
     ImVec2                      Size;               // Size passed to BeginLayout
     ImVec2                      CurrentSize;        // Bounds of layout known at the beginning the frame.
     ImVec2                      MinimumSize;        // Minimum possible size when springs are collapsed.
@@ -144,7 +145,8 @@ struct ImGuiLayout
     {
         Id = id;
         Type = type;
-        Live = false;
+        LastFrameUsed = -1;
+        LastTimeUsed = -1.0f;
         Size = CurrentSize = MinimumSize = MeasuredSize = ImVec2(0, 0);
         CurrentItemIndex = 0;
         ParentItemIndex = 0;
@@ -181,23 +183,14 @@ struct ImGuiLayoutWindowState
     }
 };
 
-struct ImGuiLayoutState
+struct ImGuiLayoutContextState
 {
-    ImGuiStorage    LayoutWindowStates;
+    ImGuiStorage            WindowStates;       // ImGuiLayoutWindowState* by window ID
+    ImGuiLayoutWindowState* LastWindowState;
 
-    ImGuiContext*   Context;
-    ImGuiID         ContextID;
-    ImGuiID         NewFramePreID;
-    ImGuiID         EndFramePostID;
-    ImGuiID         ShutdownHookID;
-
-    ImGuiLayoutState()
+    ImGuiLayoutContextState()
     {
-        Context        = NULL;
-        ContextID      = 0;
-        NewFramePreID  = 0;
-        EndFramePostID = 0;
-        ShutdownHookID = 0;
+        LastWindowState = NULL;
     }
 };
 
@@ -206,22 +199,15 @@ struct ImGuiLayoutState
 // [SECTION] Stack Layout: Context forward declarations
 //-----------------------------------------------------------------------------
 
-static ImGuiStorage GStackLayoutStates;
+// The state of a context is the UserData of its Shutdown hook, found by the hook owner.
+static ImGuiID                  GetHookOwnerID();
+static ImGuiLayoutContextState* FindContextState(ImGuiContext& g);
+static ImGuiLayoutContextState* GetContextState(ImGuiContext& g);
+static void                     NewFramePreHook(ImGuiContext* ctx, ImGuiContextHook* hook);
+static void                     ShutdownHook(ImGuiContext* ctx, ImGuiContextHook* hook);
 
-// Context management/hooks
-static ImGuiID                  GetContextID(ImGuiContext* context); // FIXME: ImGuiContext probably should have their own ID assigned
-static ImGuiLayoutState*        GetCurrentLayoutState();
-static ImGuiLayoutState*        GetLayoutState(ImGuiContext* context);
-static ImGuiLayoutState*        CreateLayoutState(ImGuiID context_id, ImGuiContext* context);
-static void                     StackLayout_NewFramePreCallback(ImGuiContext* ctx, ImGuiContextHook* hook);
-static void                     StackLayout_EndFramePostCallback(ImGuiContext* ctx, ImGuiContextHook* hook);
-static void                     StackLayout_ShutdownCallback(ImGuiContext* ctx, ImGuiContextHook* hook);
-
-static ImGuiLayoutWindowState*  GetWindowLayoutState(ImGuiID window_id, ImGuiWindow* window = NULL);
 static ImGuiLayoutWindowState*  GetCurrentWindowLayoutState();
-static void                     WindowLayoutState_OnNewFrame(ImGuiLayoutWindowState* state);
-static void                     WindowLayoutState_OnEndFrame(ImGuiLayoutWindowState* state);
-static void                     WindowLayoutState_OnShutdown(ImGuiLayoutWindowState* state);
+static void                     DestroyWindowLayoutState(ImGuiLayoutWindowState* window_state);
 
 
 //-----------------------------------------------------------------------------
@@ -258,165 +244,123 @@ static void             AddLayoutSpring(ImGuiLayout& layout, float weight, float
 // [SECTION] Stack Layout: Context
 //-----------------------------------------------------------------------------
 
-static ImGuiID GetContextID(ImGuiContext* context)
+static ImGuiID GetHookOwnerID()
 {
-    // Hash pointer to ImGuiContext which is unique
-    return ImHashData(&context, sizeof(context));
+    static const ImGuiID owner_id = ImHashStr("ImGuiStackLayout");
+    return owner_id;
 }
 
-static ImGuiLayoutState* GetCurrentLayoutState()
+static ImGuiLayoutContextState* FindContextState(ImGuiContext& g)
 {
-    return GetLayoutState(ImGui::GetCurrentContext());
+    const ImGuiID owner_id = GetHookOwnerID();
+    for (ImGuiContextHook& hook : g.Hooks)
+        if (hook.Owner == owner_id && hook.Type == ImGuiContextHookType_Shutdown)
+            return (ImGuiLayoutContextState*)hook.UserData;
+    return NULL;
 }
 
-static ImGuiLayoutState* GetLayoutState(ImGuiContext* context)
+static ImGuiLayoutContextState* GetContextState(ImGuiContext& g)
 {
-    if (context == NULL)
-        return NULL;
+    if (ImGuiLayoutContextState* state = FindContextState(g))
+        return state;
 
-    ImGuiID context_id = GetContextID(context);
+    ImGuiLayoutContextState* state = IM_NEW(ImGuiLayoutContextState);
 
-    ImGuiLayoutState* state = (ImGuiLayoutState*)GStackLayoutStates.GetVoidPtr(context_id);
-    if (state == NULL)
-        state = CreateLayoutState(context_id, context);
+    ImGuiContextHook hook;
+    hook.Owner    = GetHookOwnerID();
+    hook.UserData = state;
+    hook.Type     = ImGuiContextHookType_NewFramePre;
+    hook.Callback = NewFramePreHook;
+    ImGui::AddContextHook(&g, &hook);
+    hook.Type     = ImGuiContextHookType_Shutdown;
+    hook.Callback = ShutdownHook;
+    ImGui::AddContextHook(&g, &hook);
 
     return state;
 }
 
-static ImGuiLayoutState* CreateLayoutState(ImGuiID context_id, ImGuiContext* context)
+static void NewFramePreHook(ImGuiContext* ctx, ImGuiContextHook* hook)
 {
-    ImGuiLayoutState* state = IM_NEW(ImGuiLayoutState);
-    state->Context   = context;
-    state->ContextID = context_id;
+    ImGuiContext& g = *ctx;
+    ImGuiLayoutContextState* state = (ImGuiLayoutContextState*)hook->UserData;
 
-    ImGuiContextHook new_frame_pre_hook;
-    new_frame_pre_hook.Type     = ImGuiContextHookType_NewFramePre;
-    new_frame_pre_hook.UserData = state;
-    new_frame_pre_hook.Callback = StackLayout_NewFramePreCallback;
-    state->NewFramePreID = ImGui::AddContextHook(context, &new_frame_pre_hook);
+    // Same policy as windows and tables: free layouts unused for io.ConfigMemoryCompactTimer, all of a compacted window.
+    const bool gc_all = (g.GcCompactAll || g.IO.ConfigMemoryCompactTimer < 0.0f);
+    const float memory_compact_start_time = gc_all ? FLT_MAX : (float)g.Time - g.IO.ConfigMemoryCompactTimer;
 
-    ImGuiContextHook end_frame_post_hook;
-    end_frame_post_hook.Type     = ImGuiContextHookType_EndFramePost;
-    end_frame_post_hook.UserData = state;
-    end_frame_post_hook.Callback = StackLayout_EndFramePostCallback;
-    state->EndFramePostID = ImGui::AddContextHook(context, &end_frame_post_hook);
-
-    ImGuiContextHook shutdown_hook;
-    shutdown_hook.Type     = ImGuiContextHookType_Shutdown;
-    shutdown_hook.UserData = state;
-    shutdown_hook.Callback = StackLayout_ShutdownCallback;
-    state->ShutdownHookID = ImGui::AddContextHook(context, &shutdown_hook);
-
-    GStackLayoutStates.SetVoidPtr(context_id, state);
-
-    return state;
-}
-
-static void StackLayout_NewFramePreCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
-{
-    IM_UNUSED(ctx);
-    ImGuiLayoutState* layout_state = (ImGuiLayoutState*)hook->UserData;
-
-    for (int i = 0; i < layout_state->LayoutWindowStates.Data.Size; ++i)
+    ImVector<ImGuiStoragePair>& window_states = state->WindowStates.Data;
+    int window_states_kept = 0;
+    for (ImGuiStoragePair& window_pair : window_states)
     {
-        ImGuiLayoutWindowState* layout_window_state = (ImGuiLayoutWindowState*)layout_state->LayoutWindowStates.Data[i].val_p;
+        ImGuiLayoutWindowState* window_state = (ImGuiLayoutWindowState*)window_pair.val_p;
 
-        WindowLayoutState_OnNewFrame(layout_window_state);
-    }
-}
-
-static void StackLayout_EndFramePostCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
-{
-    IM_UNUSED(ctx);
-    ImGuiLayoutState* layout_state = (ImGuiLayoutState*)hook->UserData;
-
-    for (int i = 0; i < layout_state->LayoutWindowStates.Data.Size; ++i)
-    {
-        ImGuiLayoutWindowState* layout_window_state = (ImGuiLayoutWindowState*)layout_state->LayoutWindowStates.Data[i].val_p;
-
-        WindowLayoutState_OnEndFrame(layout_window_state);
-    }
-}
-
-static void StackLayout_ShutdownCallback(ImGuiContext* ctx, ImGuiContextHook* hook)
-{
-    IM_UNUSED(ctx);
-    ImGuiLayoutState* layout_state = (ImGuiLayoutState*)hook->UserData;
-
-    for (int i = 0; i < layout_state->LayoutWindowStates.Data.Size; ++i)
-    {
-        ImGuiLayoutWindowState* layout_window_state = (ImGuiLayoutWindowState*)layout_state->LayoutWindowStates.Data[i].val_p;
-
-        WindowLayoutState_OnShutdown(layout_window_state);
-
-        IM_DELETE(layout_window_state);
-    }
-
-    GStackLayoutStates.SetVoidPtr(layout_state->ContextID, nullptr);
-
-    IM_DELETE(layout_state);
-}
-
-
-static ImGuiLayoutWindowState* GetWindowLayoutState(ImGuiID window_id, ImGuiWindow* window)
-{
-    ImGuiLayoutState* layout_state = GetCurrentLayoutState();
-    if (layout_state == NULL)
-        return NULL;
-
-    ImGuiLayoutWindowState* window_layout_state = (ImGuiLayoutWindowState*)layout_state->LayoutWindowStates.GetVoidPtr(window_id);
-    if (window_layout_state == NULL)
-    {
-        if (window == NULL)
+        // Error recovery in End() closes layouts left open, unless disabled.
+        if (window_state->LayoutStack.Size > 0)
         {
-            window = ImGui::FindWindowByID(window_id);
-            IM_ASSERT(window && "GetWindowLayoutState called with invalid Window ID.");
+            IM_ASSERT_USER_ERROR(0, "Missing EndHorizontal(), EndVertical() or ResumeLayout() at the end of the frame!");
+            window_state->LayoutStack.resize(0);
+            window_state->SuspendStack.resize(0);
+            window_state->CurrentLayout = NULL;
         }
 
-        window_layout_state = IM_NEW(ImGuiLayoutWindowState);
-        window_layout_state->Window = window;
-        layout_state->LayoutWindowStates.SetVoidPtr(window_id, window_layout_state);
+        if (window_state->Window->MemoryCompacted)
+        {
+            DestroyWindowLayoutState(window_state);
+            continue;
+        }
+
+        ImVector<ImGuiStoragePair>& layouts = window_state->Layouts.Data;
+        int layouts_kept = 0;
+        for (ImGuiStoragePair& layout_pair : layouts)
+        {
+            ImGuiLayout* layout = (ImGuiLayout*)layout_pair.val_p;
+            if (layout->LastFrameUsed != g.FrameCount && layout->LastTimeUsed < memory_compact_start_time)
+                IM_DELETE(layout);
+            else
+                layouts[layouts_kept++] = layout_pair;
+        }
+        layouts.resize(layouts_kept);
+
+        window_states[window_states_kept++] = window_pair;
     }
-
-    return window_layout_state;
-
+    window_states.resize(window_states_kept);
+    state->LastWindowState = NULL;
 }
 
+static void ShutdownHook(ImGuiContext* ctx, ImGuiContextHook* hook)
+{
+    IM_UNUSED(ctx);
+    ImGuiLayoutContextState* state = (ImGuiLayoutContextState*)hook->UserData;
+    for (ImGuiStoragePair& window_pair : state->WindowStates.Data)
+        DestroyWindowLayoutState((ImGuiLayoutWindowState*)window_pair.val_p);
+    IM_DELETE(state);
+    hook->UserData = NULL;
+}
 
 static ImGuiLayoutWindowState* GetCurrentWindowLayoutState()
 {
-    ImGuiWindow* current_window = ImGui::GetCurrentWindow();
-    if (current_window == NULL)
-        return NULL;
+    ImGuiContext& g = *GImGui;
+    ImGuiWindow* window = g.CurrentWindow;
+    ImGuiLayoutContextState* state = GetContextState(g);
+    if (state->LastWindowState != NULL && state->LastWindowState->Window == window)
+        return state->LastWindowState;
 
-    return GetWindowLayoutState(current_window->ID, current_window);
-}
-
-static void WindowLayoutState_OnNewFrame(ImGuiLayoutWindowState* state)
-{
-    // Mark all layouts as dead. They may be revived in this frame.
-    for (int i = 0; i < state->Layouts.Data.Size; i++)
+    ImGuiLayoutWindowState* window_state = (ImGuiLayoutWindowState*)state->WindowStates.GetVoidPtr(window->ID);
+    if (window_state == NULL)
     {
-        ImGuiLayout* layout = (ImGuiLayout*)state->Layouts.Data[i].val_p;
-        layout->Live = false;
+        window_state = IM_NEW(ImGuiLayoutWindowState);
+        window_state->Window = window;
+        state->WindowStates.SetVoidPtr(window->ID, window_state);
     }
+    state->LastWindowState = window_state;
+    return window_state;
 }
 
-static void WindowLayoutState_OnEndFrame(ImGuiLayoutWindowState* state)
+static void DestroyWindowLayoutState(ImGuiLayoutWindowState* window_state)
 {
-    IM_UNUSED(state);
-    // Check stacks (like ImGuiStackSizes::CompareWithCurrentState() does)
-    IM_ASSERT(0 == state->LayoutStack.Size && (!state->LayoutStack.Size || state->LayoutStack.back()->Type == ImGuiLayoutType_Horizontal) && "BeginHorizontal/EndHorizontal Mismatch!");
-    IM_ASSERT(0 == state->LayoutStack.Size && (!state->LayoutStack.Size || state->LayoutStack.back()->Type == ImGuiLayoutType_Vertical)   && "BeginVertical/EndVertical Mismatch!");
-}
-
-static void WindowLayoutState_OnShutdown(ImGuiLayoutWindowState* state)
-{
-    for (int i = 0; i < state->Layouts.Data.Size; i++)
-    {
-        ImGuiLayout* layout = (ImGuiLayout*)state->Layouts.Data[i].val_p;
-        IM_DELETE(layout);
-    }
+    for (ImGuiStoragePair& layout_pair : window_state->Layouts.Data)
+        IM_DELETE((ImGuiLayout*)layout_pair.val_p);
+    IM_DELETE(window_state);
 }
 
 
@@ -459,7 +403,8 @@ static ImGuiLayout* CreateNewLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 siz
 
 static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float align)
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    ImGuiContext& g = *GImGui;
+    ImGuiWindow* window = g.CurrentWindow;
 
     ImGui::PushOverrideID(id);
 
@@ -468,9 +413,10 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     if (!layout)
         layout = CreateNewLayout(id, type, size);
 
-    IM_ASSERT(!layout->Live && "BeginHorizontal/BeginVertical with same ID is already live in this frame. Please use PushID() to make ID's unique or rename layout.");
+    IM_ASSERT(layout->LastFrameUsed != g.FrameCount && "BeginHorizontal/BeginVertical with same ID is already live in this frame. Please use PushID() to make ID's unique or rename layout.");
 
-    layout->Live = true;
+    layout->LastFrameUsed = g.FrameCount;
+    layout->LastTimeUsed = (float)g.Time;
 
     PushLayout(layout);
 
@@ -1115,7 +1061,11 @@ static void AddLayoutSpring(ImGuiLayout& layout, float weight, float spacing)
 
 void ErrorRecoveryTryToRecoverWindowState(ImGuiID window_id)
 {
-    ImGuiLayoutWindowState* state = GetWindowLayoutState(window_id);
+    // Called for every window, so it creates no state.
+    ImGuiLayoutContextState* context_state = FindContextState(*GImGui);
+    ImGuiLayoutWindowState* state = context_state ? (ImGuiLayoutWindowState*)context_state->WindowStates.GetVoidPtr(window_id) : NULL;
+    if (state == NULL)
+        return;
 
     while (state->LayoutStack.Size > 0) //-V1044
     {

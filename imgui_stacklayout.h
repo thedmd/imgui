@@ -37,6 +37,17 @@ Other Changes:
 - Layout: fixed a crash ending a layout begun while its parent was suspended, and on nested
   SuspendLayout() calls.
 - Layout: items outside of stack layouts no longer cost a lookup of the layout state.
+- Context: layout state is kept per context and per window, instead of in a process-global map.
+  Fixed crashes and hooks piling up with one context per thread (thread-local GImGui), and
+  modules sharing a context (plugin DLLs, hot reload) each keeping their own layout state.
+- Context: the module that submits the first layout of a context registers its hooks. Keep it
+  loaded as long as the context lives.
+- Context: fixed layout state for IDs from changing data never being freed. Layouts unused for
+  io.ConfigMemoryCompactTimer are freed, as windows and tables are, and so are all layouts of a
+  window whose memory is compacted.
+- Context: fixed an allocation outliving DestroyContext().
+- Error Handling: layouts left open at the end of the frame while error recovery is disabled are
+  reported and discarded at the next frame.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
   the global and ImGui namespaces, where same-named user code or future Dear ImGui code clash.
 
