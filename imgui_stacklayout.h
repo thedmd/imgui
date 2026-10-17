@@ -87,6 +87,9 @@ Other Changes:
   sizes from the previous frame.
 - Misc: added IMGUI_STACK_LAYOUT_VERSION and IMGUI_STACK_LAYOUT_VERSION_NUM.
 - Misc: the headers of the stack layout files no longer quote a Dear ImGui version.
+- Misc: imgui_stacklayout.cpp ignores the same Clang/GCC warnings as Dear ImGui's sources. Builds
+  with -Weverything or -Wsign-conversion reported old-style casts, float comparisons and sign
+  conversions in it.
 - Internals: moved internal types and functions to namespace ImGuiStackLayout. They were in
   the global and ImGui namespaces, where same-named user code or future Dear ImGui code clash.
 
