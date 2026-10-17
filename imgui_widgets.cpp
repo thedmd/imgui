@@ -4926,6 +4926,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
     const bool init_changed_specs_multiline = (state != NULL && (state->Stb->single_line != !is_multiline)); // state != NULL means its our state.
     const bool init_changed_specs_readonly = (state != NULL && ((state->Flags ^ flags) & ImGuiInputTextFlags_ReadOnly)); // state != NULL means its our state.
     const bool init_make_active = (input_requested_by_user || input_requested_by_nav || input_requested_by_reactivate || user_scroll_finish);
+    const bool init_keep_initial_value = (state != NULL && init_make_active && g.ActiveId != id && (flags & ImGuiInputTextFlags_KeepInitialValue));
     if (init_reload_from_user_buf)
     {
         int new_len = (int)ImStrlen(buf);
@@ -4952,7 +4953,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
         // From the moment we focused we are normally ignoring the content of 'buf' (unless we are in read-only mode)
         const int buf_len = (int)ImStrlen(buf);
         IM_ASSERT(((buf_len + 1 <= buf_size) || (buf_len == 0 && buf_size == 0)) && "Is your input buffer properly zero-terminated?");
-        if (!user_scroll_finish)
+        if (!user_scroll_finish && !init_keep_initial_value)
         {
             state->TextToRevertTo.resize(buf_len + 1);    // UTF-8. we use +1 to make sure that .Data is always pointing to at least an empty string.
             memcpy(state->TextToRevertTo.Data, buf, buf_len + 1);
@@ -4960,7 +4961,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
 
         // Preserve cursor position and undo/redo stack if we come back to same widget
         // FIXME: Since we reworked this on 2022/06, may want to differentiate recycle_cursor vs recycle_undostate?
-        bool recycle_state = (state->ID == id && !init_changed_specs_multiline);
+        bool recycle_state = (state->ID == id && !init_changed_specs_multiline && !init_keep_initial_value);
         if (recycle_state && !init_changed_specs_readonly && (state->TextLen != buf_len || (state->TextA.Data == NULL || strncmp(state->TextA.Data, buf, buf_len) != 0)))
             recycle_state = false;
 
@@ -4984,7 +4985,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
         if (!recycle_state)
             stb_textedit_initialize_state(state->Stb, !is_multiline);
 
-        if (!is_multiline)
+        if (!is_multiline && !init_keep_initial_value)
         {
             if ((flags & ImGuiInputTextFlags_AutoSelectAll) || is_mixed)
                 select_all = true;
