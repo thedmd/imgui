@@ -35,6 +35,8 @@
 #define IMGUI_HAS_TEXTURES          // Added ImGuiBackendFlags_RendererHasTextures - from IMGUI_VERSION_NUM >= 19198
 #define IMGUI_HAS_STACK_LAYOUT      // Stack-Layout PR #846
 #define IMGUI_HAS_DRAWLIST_TRANSFORMATION // ImDrawList::PushTransformation()/PopTransformation()
+#define IMGUI_HAS_HIT_TEST          // Hit-Test for widgets
+#define IMGUI_HAS_WINDOW_HIT_TEST   // Hit-Test for windows
 
 /*
 
@@ -202,6 +204,7 @@ struct ImColor;                     // Helper functions to create a color that c
 
 // Forward declarations: ImGui layer
 struct ImGuiContext;                // Dear ImGui context (opaque structure, unless including imgui_internal.h)
+struct ImGuiHitTestCallbackData;    // Callback data for PushHitTest() and SetNextWindowHitTest() (rare/advanced use)
 struct ImGuiIO;                     // Main configuration and I/O between your application and ImGui (also see: ImGuiPlatformIO)
 struct ImGuiInputTextCallbackData;  // Shared state of InputText() when using custom ImGuiInputTextCallback (rare/advanced use)
 struct ImGuiKeyData;                // Storage for ImGuiIO and IsKeyDown(), IsKeyPressed() etc functions.
@@ -297,6 +300,7 @@ typedef ImS64 ImGuiSelectionUserData;
 // Callback and functions types
 typedef int     (*ImGuiInputTextCallback)(ImGuiInputTextCallbackData* data);    // Callback function for ImGui::InputText()
 typedef void    (*ImGuiSizeCallback)(ImGuiSizeCallbackData* data);              // Callback function for ImGui::SetNextWindowSizeConstraints()
+typedef bool    (*ImGuiHitTestCallback)(ImGuiHitTestCallbackData* data);        // Callback function for ImGui::PushHitTest() and ImGui::SetNextWindowHitTest()
 typedef void*   (*ImGuiMemAllocFunc)(size_t sz, void* user_data);               // Function signature for ImGui::SetAllocatorFunctions()
 typedef void    (*ImGuiMemFreeFunc)(void* ptr, void* user_data);                // Function signature for ImGui::SetAllocatorFunctions()
 
@@ -542,6 +546,7 @@ namespace ImGui
     IMGUI_API void          SetNextWindowFocus();                                                       // set next window to be focused / top-most. call before Begin()
     IMGUI_API void          SetNextWindowScroll(const ImVec2& scroll);                                  // set next window scrolling value (use < 0.0f to not affect a given axis).
     IMGUI_API void          SetNextWindowBgAlpha(float alpha);                                          // set next window background color alpha. helper to easily override the Alpha component of ImGuiCol_WindowBg/ChildBg/PopupBg. you may also use ImGuiWindowFlags_NoBackground.
+    IMGUI_API void          SetNextWindowHitTest(ImGuiHitTestCallback callback, void* user_data = NULL); // set next window hit test, for one frame: positions it rejects go to the windows behind. call before Begin(). see ImGuiHitTestCallbackData.
     IMGUI_API void          SetWindowPos(const ImVec2& pos, ImGuiCond cond = 0);                        // (not recommended) set current window position - call within Begin()/End(). prefer using SetNextWindowPos(), as this may incur tearing and side-effects.
     IMGUI_API void          SetWindowSize(const ImVec2& size, ImGuiCond cond = 0);                      // (not recommended) set current window size - call within Begin()/End(). set to ImVec2(0, 0) to force an auto-fit. prefer using SetNextWindowSize(), as this may incur tearing and minor side-effects.
     IMGUI_API void          SetWindowCollapsed(bool collapsed, ImGuiCond cond = 0);                     // (not recommended) set current window collapsed state. prefer using SetNextWindowCollapsed().
@@ -550,6 +555,7 @@ namespace ImGui
     IMGUI_API void          SetWindowSize(const char* name, const ImVec2& size, ImGuiCond cond = 0);    // set named window size. set axis to 0.0f to force an auto-fit on this axis.
     IMGUI_API void          SetWindowCollapsed(const char* name, bool collapsed, ImGuiCond cond = 0);   // set named window collapsed state
     IMGUI_API void          SetWindowFocus(const char* name);                                           // set named window to be focused / top-most. use NULL to remove focus.
+    IMGUI_API void          SetWindowHitTest(const char* name, ImGuiHitTestCallback callback, void* user_data = NULL); // set named window hit test, until its next Begin(): call after its Begin(), every frame. see ImGuiHitTestCallbackData.
 
     // Windows Scrolling
     // - Any change of Scroll will be applied at the beginning of next frame in the first call to Begin().
@@ -606,6 +612,8 @@ namespace ImGui
     IMGUI_API float         CalcItemWidth();                                                // width of item given pushed settings and current cursor position. NOT necessarily the width of last item unlike most 'Item' functions.
     IMGUI_API void          PushTextWrapPos(float wrap_local_pos_x = 0.0f);                 // push word-wrapping position for Text*() commands. < 0.0f: no wrapping; 0.0f: wrap to end of window (or column); > 0.0f: wrap at 'wrap_pos_x' position in window local space
     IMGUI_API void          PopTextWrapPos();
+    IMGUI_API void          PushHitTest(ImGuiHitTestCallback callback, void* user_data = NULL); // push a hit test for the following items, to shape their hover area. see ImGuiHitTestCallbackData.
+    IMGUI_API void          PopHitTest();
 
     // Style read access
     // - Use the ShowStyleEditor() function to interactively see/edit the colors.
@@ -2800,6 +2808,27 @@ struct ImGuiSizeCallbackData
     ImVec2  Pos;            // Read-only.   Window position, for reference.
     ImVec2  CurrentSize;    // Read-only.   Current window size.
     ImVec2  DesiredSize;    // Read-write.  Desired size, based on user's mouse position. Write to this field to restrain resizing.
+};
+
+// Hit test callback data, as used by PushHitTest() and SetNextWindowHitTest(). Return whether 'MousePos' is part of the item or window.
+// - Items: the callback runs once 'MousePos' is within the item rectangle expanded by 'Padding', while the item is submitted.
+//   A widget testing its item again (e.g. the frame without the label) reuses the result, so the callback runs once per item.
+//   It applies to the items of the current window, groups and tables included. A child window is an item of its parent,
+//   but the items inside it are not tested (e.g. the selectables of BeginListBox()).
+//   Keyboard navigation moving the mouse (io.ConfigNavMoveSetMousePos) and box-selection use the item rectangle.
+// - Windows: the callback runs in NewFrame(), once 'MousePos' is within the window rectangle expanded by 'Padding'.
+//   Positions it rejects go to the windows behind, and io.WantCaptureMouse follows.
+//   The hit test lasts until the next Begin() of the window, so set it every frame. 'UserData' must stay valid until the next NewFrame().
+// - Don't submit items, begin windows or call PushHitTest()/PopHitTest() from the callback.
+struct ImGuiHitTestCallbackData
+{
+    ImGuiContext*   Ctx;            // Parent UI context
+    void*           UserData;       // What user passed to PushHitTest() or SetNextWindowHitTest()
+    ImGuiID         ID;             // Item ID, 0 for items without one (e.g. Text()). Window ID for windows.
+    ImVec2          MousePos;       // Position to test
+    ImVec2          RectMin;        // Item or window rectangle, unclipped
+    ImVec2          RectMax;
+    ImVec2          Padding;        // Margin around the rectangle where Dear ImGui accepts positions too: style.TouchExtraPadding, grown to style.WindowBorderHoverPadding for resizable windows
 };
 
 // Data payload for Drag and Drop operations: AcceptDragDropPayload(), GetDragDropPayload()
