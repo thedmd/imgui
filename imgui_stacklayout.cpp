@@ -143,6 +143,13 @@ struct ImGuiLayout
     ImRect                      ItemBeginLastItemRect;
 
     bool                        ClipRectPushed;
+
+    // Root layouts: how far corrections can move items, and the clip rect widened by it while items are submitted.
+    ImVec2                      SpringSizeInTree;   // Spring sizes of the layout and its nested layouts at the end of the previous frame, per axis.
+    bool                        WideClipRectPushed;
+    int                         WideClipRectCmdIndex;
+    ImVec4                      WideClipRect;
+    ImVec4                      NarrowClipRect;
     ImGuiLayoutDebugFlags       DebugFlags;
 
     ImGuiLayout(ImGuiID id, ImGuiLayoutType type)
@@ -167,6 +174,10 @@ struct ImGuiLayout
         BackupLayoutType = ImGuiLayoutType_Vertical;
         ItemBeginLastItemId = 0;
         ClipRectPushed = false;
+        SpringSizeInTree = ImVec2(0, 0);
+        WideClipRectPushed = false;
+        WideClipRectCmdIndex = 0;
+        WideClipRect = NarrowClipRect = ImVec4(0, 0, 0, 0);
         DebugFlags = ImGuiLayoutDebugFlags_None;
     }
 };
@@ -241,6 +252,9 @@ static bool             HasAnyNonZeroSpring(ImGuiLayout& layout);
 static void             BalanceChildLayouts(ImGuiLayout& layout);
 static void             BeginLayoutClipRect(ImGuiLayout& layout, bool measured);
 static void             EndLayoutClipRect(ImGuiLayout& layout);
+static void             BeginLayoutWideClipRect(ImGuiLayout& layout);
+static void             EndLayoutWideClipRect(ImGuiLayout& layout);
+static ImVec2           CalculateSpringSizeInTree(const ImGuiLayout& layout);
 static ImGuiLayoutItem* GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemType type);
 static float            CalculateLayoutItemAlignmentOffset(ImGuiLayout& layout, ImGuiLayoutItem& item);
 static void             TranslateLayoutItem(ImGuiLayoutItem& item, const ImVec2& offset);
@@ -484,6 +498,8 @@ static void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float ali
     window->DC.Indent.x = layout->StartPos.x - window->Pos.x - window->DC.ColumnsOffset.x;
     window->DC.CurrLineSize = ImVec2(0.0f, 0.0f);
 
+    if (layout->Parent == NULL)
+        BeginLayoutWideClipRect(*layout);
     BeginLayoutClipRect(*layout, measured);
 
     BeginLayoutItem(*layout);
@@ -552,6 +568,7 @@ static void EndLayout(ImGuiLayoutWindowState* window_state)
         ImGui::PopID();
 
     EndLayoutClipRect(*layout);
+    EndLayoutWideClipRect(*layout);
 
     // Restore the enclosing line, then submit the layout as one item, as EndGroup() does.
     window->DC.CursorPos = layout->StartPos;
@@ -573,7 +590,10 @@ static void EndLayout(ImGuiLayoutWindowState* window_state)
         MarkLayoutLastItem(*window_state->CurrentLayout);
 
     if (layout->Parent == NULL)
+    {
         BalanceChildLayouts(*layout);
+        layout->SpringSizeInTree = CalculateSpringSizeInTree(*layout);
+    }
 
     if (layout->DebugFlags != ImGuiLayoutDebugFlags_None)
         DebugDrawLayout(*layout);
@@ -848,6 +868,73 @@ static void EndLayoutClipRect(ImGuiLayout& layout)
 {
     if (layout.ClipRectPushed)
         ImGui::PopClipRect();
+}
+
+// Until the root layout corrects them, items can land too far by up to the spring sizes of the tree in the previous
+// frame. The clip rect is widened by that much toward the far side meanwhile, so that ItemAdd() and text rendering do
+// not cull them. Not toward the near side: hover tests use it too, and items scrolled under the title bar would take
+// its clicks.
+static void BeginLayoutWideClipRect(ImGuiLayout& layout)
+{
+    layout.WideClipRectPushed = layout.SpringSizeInTree.x > 0.0f || layout.SpringSizeInTree.y > 0.0f;
+    if (!layout.WideClipRectPushed)
+        return;
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const ImVec2 margin = layout.SpringSizeInTree;
+    layout.NarrowClipRect = draw_list->_CmdHeader.ClipRect;
+    ImGui::PushClipRect(ImVec2(layout.NarrowClipRect.x, layout.NarrowClipRect.y), ImVec2(layout.NarrowClipRect.z + margin.x, layout.NarrowClipRect.w + margin.y), false);
+    layout.WideClipRect = draw_list->_CmdHeader.ClipRect;
+    layout.WideClipRectCmdIndex = draw_list->CmdBuffer.Size - 1;
+}
+
+// Commands drawn under the wide clip rect get the original one back, then merge where it made them split.
+static void EndLayoutWideClipRect(ImGuiLayout& layout)
+{
+    if (!layout.WideClipRectPushed)
+        return;
+    ImGui::PopClipRect();
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const ImVec4 wide = layout.WideClipRect;
+    const ImVec4 narrow = layout.NarrowClipRect;
+    for (int n = layout.WideClipRectCmdIndex; n < draw_list->CmdBuffer.Size; n++)
+    {
+        // Clip rects pushed without intersecting (e.g. full screen ones) are not inside the wide one: they stay.
+        ImVec4& clip_rect = draw_list->CmdBuffer[n].ClipRect;
+        if (clip_rect.x < wide.x || clip_rect.y < wide.y || clip_rect.z > wide.z || clip_rect.w > wide.w)
+            continue;
+        clip_rect.x = ImClamp(clip_rect.x, narrow.x, narrow.z);
+        clip_rect.y = ImClamp(clip_rect.y, narrow.y, narrow.w);
+        clip_rect.z = ImClamp(clip_rect.z, clip_rect.x, narrow.z);
+        clip_rect.w = ImClamp(clip_rect.w, clip_rect.y, narrow.w);
+    }
+
+    // Same header comparison as ImDrawList::_TryMergeDrawCmds(): clip rect, texture and vertex offset.
+    const size_t header_size = offsetof(ImDrawCmd, VtxOffset) + sizeof(unsigned int);
+    int dst = ImMax(layout.WideClipRectCmdIndex - 1, 0);
+    for (int src = dst + 1; src < draw_list->CmdBuffer.Size; src++)
+    {
+        ImDrawCmd& prev_cmd = draw_list->CmdBuffer[dst];
+        ImDrawCmd& cmd = draw_list->CmdBuffer[src];
+        if (memcmp(&prev_cmd, &cmd, header_size) == 0 && prev_cmd.IdxOffset + prev_cmd.ElemCount == cmd.IdxOffset && prev_cmd.UserCallback == NULL && cmd.UserCallback == NULL)
+            prev_cmd.ElemCount += cmd.ElemCount;
+        else
+            draw_list->CmdBuffer[++dst] = cmd;
+    }
+    draw_list->CmdBuffer.resize(dst + 1);
+}
+
+static ImVec2 CalculateSpringSizeInTree(const ImGuiLayout& layout)
+{
+    ImVec2 size(0.0f, 0.0f);
+    const int axis = (layout.Type == ImGuiLayoutType_Horizontal) ? 0 : 1;
+    for (const ImGuiLayoutItem& item : layout.Items)
+        if (item.Type == ImGuiLayoutItemType_Spring)
+            size[axis] += item.SpringSize;
+    for (const ImGuiLayout* child = layout.FirstChild; child != NULL; child = child->NextSibling)
+        size += CalculateSpringSizeInTree(*child);
+    return size;
 }
 
 static ImGuiLayoutItem* GenerateLayoutItem(ImGuiLayout& layout, ImGuiLayoutItemType type)

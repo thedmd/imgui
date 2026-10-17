@@ -72,6 +72,9 @@ Other Changes:
   once per spring that changed size.
 - Springs: Spring() always submits an item, so GetItemRect*() and IsItem*() after it refer to the
   spring. A spring with no size and no spacing used to leave the previous item there.
+- Springs: fixed items after an item that appears missing parts (e.g. their text) for one frame:
+  placed with the previous frame's spring sizes, they were culled outside of the clip rect before
+  the root layout moved them into view.
 - Debug: added SetNextLayoutDebugFlags() with ImGuiLayoutDebugFlags_DrawSprings and
   ImGuiLayoutDebugFlags_DrawItems: the layout draws its springs or items where it placed them.
 - Docs: the ID scope of layouts is documented with BeginHorizontal()/BeginVertical(), with how to
