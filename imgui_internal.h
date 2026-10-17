@@ -2320,6 +2320,8 @@ struct ImGuiViewportP : public ImGuiViewport
     ImVec2              WorkInsetMax;           // "
     ImVec2              BuildWorkInsetMin;      // Work Area inset accumulator for current frame, to become next frame's WorkInset
     ImVec2              BuildWorkInsetMax;      // "
+    ImVec2              PlatformWorkInsetMin;   // Work Area inset from Platform_GetWindowWorkAreaInsets() for the current frame. Popups and tooltips avoid it too.
+    ImVec2              PlatformWorkInsetMax;   // "
 
     ImGuiViewportP()                    { Window = NULL; Idx = -1; LastFrameActive = LastFocusedStampCount = -1; LastNameHash = 0; Alpha = LastAlpha = 1.0f; LastFocusedHadNavWindow = false; PlatformMonitor = -1; BgFgDrawLists[0] = BgFgDrawLists[1] = NULL; BgFgDrawListsLastFrameActive[0] = BgFgDrawListsLastFrameActive[1] = -1; BgFgDrawListsLastTimeActive[0] = BgFgDrawListsLastTimeActive[1] = -1.0; LastPlatformPos = LastPlatformSize = LastRendererSize = ImVec2(FLT_MAX, FLT_MAX); }
     ~ImGuiViewportP()                   { if (BgFgDrawLists[0]) IM_DELETE(BgFgDrawLists[0]); if (BgFgDrawLists[1]) IM_DELETE(BgFgDrawLists[1]); }

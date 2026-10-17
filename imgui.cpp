@@ -13878,8 +13878,11 @@ ImRect ImGui::GetPopupAllowedExtentRect(ImGuiWindow* window)
     }
     else
     {
-        // Use the full viewport area (not work area) for popups
-        r_screen = window->Viewport->GetMainRect();
+        // Use the full viewport area (not work area) for popups, except the insets from the platform (e.g. display cutouts)
+        ImGuiViewportP* viewport = window->Viewport;
+        r_screen = viewport->GetMainRect();
+        r_screen.Min += viewport->PlatformWorkInsetMin;
+        r_screen.Max -= viewport->PlatformWorkInsetMax;
     }
     ImVec2 padding = g.Style.DisplaySafeAreaPadding;
     r_screen.Expand(ImVec2((r_screen.GetWidth() > padding.x * 2) ? -padding.x : 0.0f, (r_screen.GetHeight() > padding.y * 2) ? -padding.y : 0.0f));
@@ -17457,12 +17460,13 @@ static void ImGui::UpdateViewportsNewFrame()
         viewport->WorkInsetMin = viewport->BuildWorkInsetMin;
         viewport->WorkInsetMax = viewport->BuildWorkInsetMax;
         viewport->BuildWorkInsetMin = viewport->BuildWorkInsetMax = ImVec2(0.0f, 0.0f);
+        viewport->PlatformWorkInsetMin = viewport->PlatformWorkInsetMax = ImVec2(0.0f, 0.0f);
         if (g.PlatformIO.Platform_GetWindowWorkAreaInsets != NULL && platform_funcs_available)
         {
             ImVec4 insets = g.PlatformIO.Platform_GetWindowWorkAreaInsets(viewport);
             IM_ASSERT(insets.x >= 0.0f && insets.y >= 0.0f && insets.z >= 0.0f && insets.w >= 0.0f);
-            viewport->BuildWorkInsetMin = ImVec2(insets.x, insets.y);
-            viewport->BuildWorkInsetMax = ImVec2(insets.z, insets.w);
+            viewport->BuildWorkInsetMin = viewport->PlatformWorkInsetMin = ImVec2(insets.x, insets.y);
+            viewport->BuildWorkInsetMax = viewport->PlatformWorkInsetMax = ImVec2(insets.z, insets.w);
         }
         viewport->UpdateWorkRect();
 
