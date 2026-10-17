@@ -35,6 +35,7 @@
 #define IMGUI_HAS_TEXTURES          // Added ImGuiBackendFlags_RendererHasTextures - from IMGUI_VERSION_NUM >= 19198
 #define IMGUI_HAS_VIEWPORT          // In 'docking' WIP branch.
 #define IMGUI_HAS_DOCK              // In 'docking' WIP branch.
+#define IMGUI_HAS_MODAL_DIM_FADE_OUT // The dimming behind a modal fades out after it closes
 
 /*
 
