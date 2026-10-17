@@ -1665,7 +1665,7 @@ void ImDrawList::PathArcTo(const ImVec2& center, float radius, float a_min, floa
     }
 
     // Automatic segment count
-    if (radius <= _Data->ArcFastRadiusCutoff)
+    if (radius * _InvFringeScale <= _Data->ArcFastRadiusCutoff)
     { 
         const bool a_is_reverse = a_max < a_min;
 
@@ -2726,7 +2726,7 @@ void ImDrawList::AddCircle(const ImVec2& center, float radius, ImU32 col, int nu
         return;
     }
 
-    if (num_segments <= 0 && outer_radius <= _Data->ArcFastRadiusCutoff)
+    if (num_segments <= 0 && outer_radius * _InvFringeScale <= _Data->ArcFastRadiusCutoff)
     {
         // Use arc with automatic segment count
         const int a_step = IM_DRAWLIST_ARCFAST_SAMPLE_MAX / _CalcCircleAutoSegmentCount(outer_radius); // Use outer_radius for segment count to be consistent with rounded rect.
@@ -2771,7 +2771,7 @@ void ImDrawList::AddCircleFilled(const ImVec2& center, float radius, ImU32 col, 
         radius = min_radius;
     }
 
-    if (num_segments <= 0 && radius <= _Data->ArcFastRadiusCutoff)
+    if (num_segments <= 0 && radius * _InvFringeScale <= _Data->ArcFastRadiusCutoff)
     {
         // Use arc with automatic segment count
         _PathArcToFastEx(center, radius, 0, IM_DRAWLIST_ARCFAST_SAMPLE_MAX, 0);
