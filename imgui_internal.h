@@ -1325,6 +1325,44 @@ struct IMGUI_API ImGuiInputTextDeactivatedState
     void    ClearFreeMemory()           { ID = 0; ElapseFrame = 0; TextA.clear(); }
 };
 
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+// Text, selection and composition of InputText() as exchanged with the platform text editor.
+struct IMGUI_API ImGuiInputTextPlatformState
+{
+    ImVector<char>      Text;
+    int                 SelectionStart;     // -1 when undefined
+    int                 SelectionEnd;
+    int                 CompositionStart;   // -1 when there is none
+    int                 CompositionEnd;
+};
+
+// Internal state of InputText() synchronization with platform_io.Platform_SetTextInputDataFn() / Platform_GetTextInputDataFn().
+// A session lasts while one field is active in consecutive frames.
+struct IMGUI_API ImGuiInputTextPlatformSyncState
+{
+    ImGuiID                     ID;                 // widget id of the session, 0 when there is none
+    int                         LastFrame;          // frame of the last synchronization
+    bool                        Valid;              // our state was sent in this session (Synced is meaningful)
+    bool                        Available;          // the platform editor called back this frame
+    bool                        InGet;              // within Platform_GetTextInputDataFn(), the only time its callback is valid
+    bool                        OurChanged;         // our state changed since the last synchronization, as of before this frame's Get
+    bool                        SendRequested;      // send our state even if it did not change (session start, adoption altered by filtering)
+    bool                        SetPending;         // the platform state did not change since our last Set: its next change may be the echo of it
+    bool                        HasPlatform;        // Platform is meaningful
+    bool                        Submitted;          // the editor submitted the text this frame
+    int                         CompositionStart;   // composition range in our text, -1 when there is none
+    int                         CompositionEnd;
+    ImGuiInputTextPlatformState Synced;             // our state at the last synchronization (Set or adoption)
+    ImGuiInputTextPlatformState Platform;           // platform state as last reported, to tell its changes from repeats
+    ImGuiInputTextState*        GetState;           // valid within Platform_GetTextInputDataFn()
+    ImGuiInputTextCallback      GetCallback;
+    void*                       GetCallbackUserData;
+
+    ImGuiInputTextPlatformSyncState()   { memset((void*)this, 0, sizeof(*this)); CompositionStart = CompositionEnd = -1; }
+    void    ClearFreeMemory()           { ID = 0; Valid = OurChanged = SendRequested = SetPending = HasPlatform = Submitted = false; CompositionStart = CompositionEnd = -1; Synced.Text.clear(); Platform.Text.clear(); }
+};
+#endif
+
 // Forward declare imstb_textedit.h structure + make its main configuration define accessible
 #undef IMSTB_TEXTEDIT_STRING
 #undef IMSTB_TEXTEDIT_CHARTYPE
@@ -2616,6 +2654,9 @@ struct ImGuiContext
     ImGuiInputTextState     InputTextState;
     ImGuiTextIndex          InputTextLineIndex;                 // Temporary storage
     ImGuiInputTextDeactivatedState InputTextDeactivatedState;
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+    ImGuiInputTextPlatformSyncState InputTextPlatformSyncState;
+#endif
     ImFontBaked             InputTextPasswordFontBackupBaked;
     ImFontFlags             InputTextPasswordFontBackupFlags;
     ImGuiID                 InputTextReactivateId;              // ID of InputText to reactivate on next frame (for io.ConfigInputTextEnterKeepActive behavior)

@@ -4681,6 +4681,9 @@ void ImGui::Shutdown()
     g.InputTextState.ClearFreeMemory();
     g.InputTextLineIndex.clear();
     g.InputTextDeactivatedState.ClearFreeMemory();
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+    g.InputTextPlatformSyncState.ClearFreeMemory();
+#endif
 
     g.SettingsWindows.clear();
     g.SettingsHandlers.clear();
@@ -6225,6 +6228,20 @@ void ImGui::EndFrame()
         g.PlatformIO.Platform_SetImeDataFn(&g, viewport, ime_data);
     }
     g.WantTextInputNextFrame = ime_data->WantTextInput ? 1 : 0;
+
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+    // End the platform text input session of a field which did not synchronize this frame (deactivated or not submitted)
+    ImGuiInputTextPlatformSyncState* text_input_sync = &g.InputTextPlatformSyncState;
+    if (text_input_sync->ID != 0 && text_input_sync->LastFrame != g.FrameCount)
+    {
+        if (text_input_sync->Valid && g.PlatformIO.Platform_SetTextInputDataFn != NULL)
+        {
+            ImGuiPlatformTextInputData data; // ID 0
+            g.PlatformIO.Platform_SetTextInputDataFn(&g, &data);
+        }
+        text_input_sync->ClearFreeMemory();
+    }
+#endif
 
     // Hide and unfocus implicit/fallback "Debug" window if it hasn't been used
     g.WithinFrameScopeWithImplicitWindow = false;
@@ -16282,6 +16299,11 @@ void ImGuiPlatformIO::ClearPlatformHandlers()
     Platform_OpenInShellUserData = NULL;
     Platform_SetImeDataFn = NULL;
     Platform_ImeUserData = NULL;
+#ifdef IMGUI_HAS_IME_TEXT_INPUT
+    Platform_SetTextInputDataFn = NULL;
+    Platform_GetTextInputDataFn = NULL;
+    Platform_TextInputUserData = NULL;
+#endif
     InitializeDefaultPlatformHandlers(*this); // Rrevents losing the functionality provided by Platform_*_DefaultImpl on backend re-creation.
 }
 
