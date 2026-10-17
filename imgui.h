@@ -38,6 +38,7 @@
 #define IMGUI_HAS_HIT_TEST          // Hit-Test for widgets
 #define IMGUI_HAS_WINDOW_HIT_TEST   // Hit-Test for windows
 #define IMGUI_HAS_IME_TEXT_INPUT    // InputText() state sync with platform text editors via platform_io.Platform_SetTextInputDataFn/Platform_GetTextInputDataFn
+#define IMGUI_HAS_INPUT_TEXT_KEEP_INITIAL_VALUE // ImGuiInputTextFlags_KeepInitialValue
 
 /*
 
@@ -1369,6 +1370,7 @@ enum ImGuiInputTextFlags_
     ImGuiInputTextFlags_AllowTabInput       = 1 << 5,   // Pressing TAB input a '\t' character into the text field
     ImGuiInputTextFlags_EnterReturnsTrue    = 1 << 6,   // Return 'true' when Enter is pressed (as opposed to every time the value was modified). Consider disabling LiveEdit! or using IsItemDeactivatedAfterEdit() instead!
     ImGuiInputTextFlags_EscapeClearsAll     = 1 << 7,   // Escape key clears content if not empty, and deactivate otherwise (contrast to default behavior of Escape to revert)
+    ImGuiInputTextFlags_KeepInitialValue    = 1 << 30,  // Activating the field again, with no other text field active in between, keeps the text Escape reverts to from the previous activation, and reloads the field from the buffer: cursor, selection and undo history start over.
     ImGuiInputTextFlags_CtrlEnterForNewLine = 1 << 8,   // In multi-line mode: validate with Enter, add new line with Ctrl+Enter (default is opposite: validate with Ctrl+Enter, add line with Enter). Note that Shift+Enter always enter a new line either way.
 
     // Other options
