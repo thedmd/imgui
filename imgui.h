@@ -33,6 +33,7 @@
 #define IMGUI_VERSION_NUM   19300
 #define IMGUI_HAS_TABLE             // Added BeginTable() - from IMGUI_VERSION_NUM >= 18000
 #define IMGUI_HAS_TEXTURES          // Added ImGuiBackendFlags_RendererHasTextures - from IMGUI_VERSION_NUM >= 19198
+#define IMGUI_HAS_MODAL_DIM_FADE_OUT // The dimming behind a modal fades out after it closes
 
 /*
 

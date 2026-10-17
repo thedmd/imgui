@@ -4429,6 +4429,7 @@ ImGuiContext::ImGuiContext(ImFontAtlas* shared_font_atlas)
     NavWindowingToggleKey = ImGuiKey_None;
 
     DimBgRatio = 0.0f;
+    DimBgModalAnim = NULL;
 
     DragDropActive = DragDropWithinSource = DragDropWithinTarget = false;
     DragDropSourceFlags = ImGuiDragDropFlags_None;
@@ -5892,6 +5893,8 @@ void ImGui::NewFrame()
         g.DimBgRatio = ImMin(g.DimBgRatio + g.IO.DeltaTime * 6.0f, 1.0f);
     else
         g.DimBgRatio = ImMax(g.DimBgRatio - g.IO.DeltaTime * 10.0f, 0.0f);
+    if (g.DimBgRatio <= 0.0f)
+        g.DimBgModalAnim = NULL;
 
     g.MouseCursor = ImGuiMouseCursor_Arrow;
     g.WantCaptureMouseNextFrame = g.WantCaptureKeyboardNextFrame = g.WantTextInputNextFrame = -1;
@@ -6139,7 +6142,8 @@ static void ImGui::RenderDimmedBackgrounds()
         return;
     const bool dim_bg_for_modal = (modal_window != NULL);
     const bool dim_bg_for_window_list = (g.NavWindowingTargetAnim != NULL && g.NavWindowingTargetAnim->Active);
-    if (!dim_bg_for_modal && !dim_bg_for_window_list)
+    const bool dim_bg_for_modal_fade_out = (!dim_bg_for_modal && !dim_bg_for_window_list && g.DimBgModalAnim != NULL);
+    if (!dim_bg_for_modal && !dim_bg_for_window_list && !dim_bg_for_modal_fade_out)
         return;
 
     if (dim_bg_for_modal)
@@ -6147,9 +6151,18 @@ static void ImGui::RenderDimmedBackgrounds()
         // Draw dimming behind modal or a begin stack child, whichever comes first in draw order.
         ImGuiWindow* dim_behind_window = FindBottomMostVisibleWindowWithinBeginStack(modal_window);
         RenderDimmedBackgroundBehindWindow(dim_behind_window, GetColorU32(modal_window->DC.ModalDimBgColor, g.DimBgRatio));
+        g.DimBgModalAnim = modal_window;
+    }
+    else if (dim_bg_for_modal_fade_out)
+    {
+        // Fade out the dimming of a closed modal over everything
+        ImGuiViewport* viewport = GetMainViewport();
+        GetForegroundDrawList(viewport)->AddRectFilled(viewport->Pos, viewport->Pos + viewport->Size, GetColorU32(g.DimBgModalAnim->DC.ModalDimBgColor, g.DimBgRatio));
     }
     else if (dim_bg_for_window_list)
     {
+        g.DimBgModalAnim = NULL;
+
         // Draw dimming behind Ctrl+Tab target window and behind Ctrl+Tab UI window
         RenderDimmedBackgroundBehindWindow(g.NavWindowingTargetAnim, GetColorU32(ImGuiCol_NavWindowingDimBg, g.DimBgRatio));
 

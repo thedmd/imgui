@@ -2527,6 +2527,7 @@ struct ImGuiContext
 
     // Render
     float                   DimBgRatio;                         // 0.0..1.0 animation when fading in a dimming background (for modal window and Ctrl+Tab list)
+    ImGuiWindow*            DimBgModalAnim;                     // Record of last visible modal until DimBgRatio becomes 0.0f, so the dimming can fade out after it closes.
 
     // Drag and Drop
     bool                    DragDropActive;
