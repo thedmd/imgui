@@ -41,6 +41,7 @@
 #define IMGUI_HAS_WINDOW_HIT_TEST   // Hit-Test for windows
 #define IMGUI_HAS_IME_TEXT_INPUT    // InputText() state sync with platform text editors via platform_io.Platform_SetTextInputDataFn/Platform_GetTextInputDataFn
 #define IMGUI_HAS_INPUT_TEXT_KEEP_INITIAL_VALUE // ImGuiInputTextFlags_KeepInitialValue
+#define IMGUI_HAS_MODAL_DIM_FADE_OUT // The dimming behind a modal fades out after it closes
 
 /*
 
