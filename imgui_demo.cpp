@@ -10945,6 +10945,82 @@ static void ShowExampleAppCustomRendering(bool* p_open)
             ImGui::EndTabItem();
         }
 
+#ifdef IMGUI_HAS_DRAWLIST_TRANSFORMATION
+        // Demonstrate ImDrawList::PushTransformation(): primitives use local coordinates, transformed when the scope is popped.
+        // Clip rects stay in screen coordinates.
+        if (ImGui::BeginTabItem("Transformation"))
+        {
+            IMGUI_DEMO_MARKER("Examples/Custom rendering/Transformation");
+            static float angle = 0.0f;
+            static float zoom = 1.0f;
+            static ImVec2 pan(0.0f, 0.0f);
+            static bool mirror = false;
+            static bool non_scaling_stroke = false;
+            ImGui::SliderAngle("Rotation", &angle, -180.0f, 180.0f);
+            ImGui::SliderFloat("Zoom", &zoom, 0.25f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+            ImGui::Checkbox("Mirror", &mirror);
+            ImGui::SameLine();
+            ImGui::Checkbox("ImDrawFlags_NonScalingStroke", &non_scaling_stroke);
+            ImGui::SameLine(); HelpMarker("Stroke thickness scales with the transformation, unless ImDrawFlags_NonScalingStroke is set.\nThe anti-aliasing fringe stays one pixel.");
+            ImGui::Text("Mouse Right: drag to pan, Mouse Wheel: zoom.");
+
+            ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();
+            ImVec2 canvas_sz = ImGui::GetContentRegionAvail();
+            if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
+            if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
+            ImVec2 canvas_p1 = ImVec2(canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y);
+            ImGui::InvisibleButton("canvas", canvas_sz, ImGuiButtonFlags_MouseButtonRight);
+            ImGuiIO& io = ImGui::GetIO();
+            if (ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY) && io.MouseWheel != 0.0f)
+                zoom = IM_CLAMP(zoom * (1.0f + io.MouseWheel * 0.10f), 0.25f, 8.0f);
+            if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0.0f))
+            {
+                pan.x += io.MouseDelta.x;
+                pan.y += io.MouseDelta.y;
+            }
+
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
+            draw_list->PushClipRect(canvas_p0, canvas_p1, true);
+
+            // Local coordinates: a 200x200 area around (0,0), placed at the center of the canvas.
+            // Combine(a, b) applies 'a' first. A translation by whole pixels keeps shapes and text pixel aligned.
+            const ImVec2 origin((float)(int)(canvas_p0.x + canvas_sz.x * 0.5f + pan.x), (float)(int)(canvas_p0.y + canvas_sz.y * 0.5f + pan.y));
+            const ImMatrix transformation = ImMatrix::Combine(ImMatrix::Combine(ImMatrix::Scaling(mirror ? -zoom : zoom, zoom), ImMatrix::Rotation(angle)), ImMatrix::Translation(origin));
+            if (non_scaling_stroke)
+                draw_list->PushDrawFlag(ImDrawFlags_NonScalingStroke, true);
+            draw_list->PushTransformation(transformation);
+            for (int n = -100; n <= 100; n += 20)
+            {
+                draw_list->AddLine(ImVec2((float)n, -100.0f), ImVec2((float)n, 100.0f), IM_COL32(200, 200, 200, 40));
+                draw_list->AddLine(ImVec2(-100.0f, (float)n), ImVec2(100.0f, (float)n), IM_COL32(200, 200, 200, 40));
+            }
+            draw_list->AddRect(ImVec2(-100.0f, -100.0f), ImVec2(100.0f, 100.0f), IM_COL32(255, 255, 255, 255), 0.0f, 2.0f);
+            draw_list->AddRectFilled(ImVec2(-80.0f, -80.0f), ImVec2(-20.0f, -40.0f), IM_COL32(90, 140, 255, 255), 10.0f);
+            draw_list->AddCircle(ImVec2(50.0f, -50.0f), 30.0f, IM_COL32(255, 200, 0, 255), 0, 3.0f);
+            draw_list->AddBezierCubic(ImVec2(-80.0f, 80.0f), ImVec2(-40.0f, 0.0f), ImVec2(40.0f, 120.0f), ImVec2(80.0f, 40.0f), IM_COL32(0, 255, 120, 255), 2.0f);
+            draw_list->AddText(ImVec2(-80.0f, -10.0f), IM_COL32(255, 255, 255, 255), "Local coordinates");
+
+            // GetTransformation() maps local coordinates to screen ones, its inverse maps the mouse back.
+            const ImVec2 mouse_local = draw_list->GetTransformation().Inverted().Transformed(io.MousePos);
+            const bool is_hovered = ImGui::IsItemHovered();
+            if (is_hovered)
+                draw_list->AddCircleFilled(mouse_local, 4.0f, IM_COL32(255, 0, 0, 255));
+            draw_list->PopTransformation();
+            if (non_scaling_stroke)
+                draw_list->PopDrawFlag();
+            if (is_hovered)
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Mouse in local coordinates: (%.1f, %.1f)", mouse_local.x, mouse_local.y);
+                draw_list->AddText(ImVec2(canvas_p0.x + 4.0f, canvas_p0.y + 4.0f), IM_COL32(255, 255, 255, 255), buf);
+            }
+            draw_list->PopClipRect();
+
+            ImGui::EndTabItem();
+        }
+#endif
+
         if (ImGui::BeginTabItem("BG/FG draw lists"))
         {
             IMGUI_DEMO_MARKER("Examples/Custom rendering/BG & FG draw lists");
