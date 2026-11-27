@@ -1139,16 +1139,19 @@ static void AddLayoutSpring(ImGuiLayout& layout, float weight, float spacing)
         spring_item->SpringSpacing = spacing;
 
     // Submitted even when empty, so that GetItemRect*() and IsItem*() after Spring() refer to the spring.
+    // The size of the Dummy emitted for the spring: the size of the spring (and its spacing) in the layout direction,
+    // 0 in the other direction. The 0 is important: an empty group after the spring takes this Dummy's size
+    // (EndGroup()), so a Dummy as tall as the row would keep the row from shrinking.
     ImVec2 spring_size, spring_spacing;
     if (layout.Type == ImGuiLayoutType_Horizontal)
     {
         spring_spacing = ImVec2(0.0f, g.Style.ItemSpacing.y);
-        spring_size    = ImVec2(spacing + spring_item->SpringSize, layout.CurrentSize.y);
+        spring_size    = ImVec2(spacing + spring_item->SpringSize, 0.0f);
     }
     else
     {
         spring_spacing = ImVec2(g.Style.ItemSpacing.x, 0.0f);
-        spring_size    = ImVec2(layout.CurrentSize.x, spacing + spring_item->SpringSize);
+        spring_size    = ImVec2(0.0f, spacing + spring_item->SpringSize);
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImFloor(spring_spacing));
